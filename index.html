@@ -1,0 +1,1999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Windfall — Neighborhood Fruit Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" crossorigin="anonymous"></script>
+<style>
+  :root{
+    --paper: #EDEFE4;
+    --paper-raised: #F6F7EF;
+    --ink: #232B22;
+    --ink-soft: #5B6459;
+    --line: rgba(35,43,34,0.14);
+    --plum: #5B3A5C;
+    --leaf: #5C7A4E;
+    --gold: #C79A3B;
+    --danger: #9B3B34;
+    --bloom: #C97FA6;
+
+    --c-apple: #C1443A;
+    --c-pear: #B8A13B;
+    --c-peach: #DE8248;
+    --c-plum: #6B4E7A;
+    --c-apricot: #E0A23A;
+    --c-fig: #7A4B3A;
+    --c-citrus: #E2A62E;
+    --c-cherry: #9B2335;
+    --c-grape: #6E4B8A;
+    --c-pomegranate: #A23B3B;
+    --c-persimmon: #D9762B;
+    --c-other: #6B7A63;
+
+    --c-elderberry: #3D2A4A;
+    --c-gooseberry: #8FA24A;
+    --c-mulberry: #4A2E42;
+    --c-blackberry: #2E2033;
+    --c-raspberry: #B23A4E;
+    --c-blueberry: #3A4A7A;
+    --c-serviceberry: #6B4E63;
+    --c-goji: #D9622E;
+    --c-currant: #A23345;
+    --c-quince: #C7B23A;
+    --c-kiwi: #7A8E3A;
+    --c-pawpaw: #6B7A3A;
+    --c-loquat: #E0932E;
+    --c-passionfruit: #7A3560;
+    --c-asianpear: #C9A227;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,.display{ font-family:'Fraunces',serif; letter-spacing:-0.01em; }
+  .mono{ font-family:'JetBrains Mono',monospace; }
+
+  /* ---------- Layout shell ---------- */
+  #app{ display:flex; flex-direction:column; height:100vh; min-height:560px; }
+
+  header.top{
+    padding:16px 20px 12px;
+    border-bottom:1px solid var(--line);
+    background:var(--paper-raised);
+    flex-shrink:0;
+  }
+  header.top .brand{ display:flex; align-items:baseline; gap:10px; }
+  header.top h1{ font-size:22px; font-weight:600; margin:0; color:var(--ink); }
+  header.top .tagline{ font-size:12.5px; color:var(--ink-soft); margin-top:2px; }
+  .row-divider{
+    height:1px; margin-top:10px;
+    background-image: repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 12px);
+  }
+
+  .banner{
+    font-size:12px; color:var(--ink-soft); margin-top:8px;
+    display:flex; align-items:center; gap:6px;
+  }
+  .banner .dot{ width:6px; height:6px; border-radius:50%; background:var(--leaf); flex-shrink:0; }
+
+  main.layout{ flex:1; display:flex; min-height:0; }
+
+  #map-pane{ position:relative; flex:1 1 60%; min-width:0; }
+  #map{ position:absolute; inset:0; }
+  #map.add-mode{ cursor: crosshair; }
+
+  .map-controls{ position:absolute; top:12px; left:12px; z-index:500; display:flex; gap:8px; }
+  .location-search-box{
+    font-size:12.5px; padding:9px 12px; border-radius:8px; border:1px solid var(--line);
+    width:220px; box-shadow:0 2px 6px rgba(35,43,34,0.12);
+  }
+  .map-btn{
+    font-family:'Inter',sans-serif; font-size:13px; font-weight:600;
+    background:var(--paper-raised); color:var(--ink); border:1px solid var(--line);
+    padding:9px 14px; border-radius:8px; cursor:pointer; box-shadow:0 2px 6px rgba(35,43,34,0.12);
+  }
+  .map-btn:hover{ background:#fff; }
+  .map-btn.primary{ background:var(--leaf); color:#fff; border-color:var(--leaf); }
+  .map-btn.active{ background:var(--plum); color:#fff; border-color:var(--plum); }
+
+  .add-hint{
+    position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
+    background:var(--plum); color:#fff; font-size:13px; padding:8px 16px; border-radius:20px;
+    z-index:500; box-shadow:0 3px 10px rgba(0,0,0,0.2); display:none;
+  }
+  .add-hint.visible{ display:block; }
+
+  /* ---------- Sidebar ---------- */
+  #sidebar{
+    width:340px; flex-shrink:0; border-left:1px solid var(--line);
+    background:var(--paper-raised); overflow-y:auto;
+  }
+  #sidebar.hidden{ display:none; }
+  .sidebar-head{ padding:14px 16px 8px; }
+  .sidebar-head h2{ font-size:15px; margin:0 0 2px; font-weight:600; }
+  .sidebar-head .count{ font-size:12px; color:var(--ink-soft); }
+
+  .tree-row{
+    display:flex; align-items:center; gap:11px;
+    padding:11px 16px; border-top:1px solid var(--line); cursor:pointer;
+  }
+  .tree-row:hover{ background:rgba(91,58,92,0.06); }
+  .fruit-dot{ width:14px; height:14px; border-radius:50%; flex-shrink:0; border:1.5px solid rgba(0,0,0,0.15); }
+  .tree-row .meta{ min-width:0; flex:1; }
+  .tree-row .name{ font-size:13.5px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tree-row .sub{ font-size:11.5px; color:var(--ink-soft); }
+  .empty-state{ padding:30px 20px; text-align:center; color:var(--ink-soft); font-size:13px; line-height:1.5; }
+
+  /* ---------- Ripeness dial (signature element) ---------- */
+  .dial{ position:relative; width:38px; height:38px; flex-shrink:0; }
+  .dial svg{ transform:rotate(-90deg); }
+  .dial .bg{ stroke:var(--line); fill:none; stroke-width:4; }
+  .dial .fg{ fill:none; stroke-width:4; stroke-linecap:round; transition:stroke-dashoffset 0.4s ease; }
+  .dial .label{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:9px; font-weight:600; font-family:'JetBrains Mono',monospace;
+  }
+
+  /* ---------- Drawer / modal ---------- */
+  #overlay{
+    position:fixed; inset:0; background:rgba(35,43,34,0.4); z-index:1000;
+    display:none; align-items:flex-end; justify-content:flex-end;
+  }
+  #overlay.visible{ display:flex; }
+  #drawer{
+    width:min(440px, 100vw); height:100%; background:var(--paper-raised);
+    box-shadow:-8px 0 24px rgba(0,0,0,0.18); overflow-y:auto;
+    padding:22px 22px 40px; position:relative;
+  }
+  #drawer .close-btn{
+    position:absolute; top:16px; right:18px; background:none; border:none;
+    font-size:20px; cursor:pointer; color:var(--ink-soft); line-height:1;
+  }
+  #drawer h2{ font-size:21px; margin:0 0 4px; padding-right:30px; }
+  .field{ margin-bottom:14px; }
+  .field label{ display:block; font-size:11.5px; font-weight:600; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:5px; }
+  .field input[type=text], .field textarea, .field select, .field input[type=date]{
+    width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:7px;
+    font-family:'Inter',sans-serif; font-size:13.5px; background:#fff; color:var(--ink);
+  }
+  .field textarea{ resize:vertical; min-height:52px; }
+  .fruit-combobox{ position:relative; }
+  .fruit-combobox input{
+    width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:7px;
+    font-family:'Inter',sans-serif; font-size:13.5px; background:#fff; color:var(--ink);
+  }
+  .fruit-dropdown{
+    display:none; position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:50;
+    background:#fff; border:1px solid var(--line); border-radius:9px; box-shadow:0 6px 18px rgba(35,43,34,0.18);
+    max-height:220px; overflow-y:auto;
+  }
+  .fruit-dropdown.open{ display:block; }
+  .fruit-option{
+    display:flex; align-items:center; gap:9px; padding:9px 12px; cursor:pointer; font-size:13.5px;
+  }
+  .fruit-option:hover, .fruit-option.highlighted{ background:var(--paper); }
+  .fruit-option .fruit-dot{ width:11px; height:11px; border-radius:50%; flex-shrink:0; border:1.5px solid rgba(0,0,0,0.15); }
+  .fruit-option-empty{ padding:12px; font-size:12.5px; color:var(--ink-soft); }
+
+  .advice-card{
+    background:rgba(91,58,92,0.07); border:1px solid rgba(91,58,92,0.2);
+    border-radius:10px; padding:12px 14px; font-size:12.5px; line-height:1.5; margin:14px 0;
+  }
+  .advice-card .tag{
+    display:inline-block; font-size:10px; font-weight:600; text-transform:uppercase;
+    letter-spacing:0.05em; padding:2px 7px; border-radius:10px; margin-bottom:6px;
+  }
+  .tag.climacteric{ background:var(--leaf); color:#fff; }
+  .tag.non-climacteric{ background:var(--danger); color:#fff; }
+  .tag.unknown{ background:var(--ink-soft); color:#fff; }
+
+  .predict-box{
+    border:1px solid var(--line); border-radius:10px; padding:14px; margin:14px 0; background:#fff;
+  }
+  .predict-box .predict-head{ display:flex; align-items:center; justify-content:between; gap:10px; }
+  .predict-result{ display:flex; align-items:center; gap:14px; margin-top:10px; }
+  .predict-result .dial{ width:56px; height:56px; }
+  .predict-result .text .headline{ font-size:14.5px; font-weight:600; }
+  .predict-result .text .sub{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
+  .predict-note{ font-size:11px; color:var(--ink-soft); margin-top:8px; line-height:1.5; }
+
+  button.action{
+    font-family:'Inter',sans-serif; font-size:13px; font-weight:600; cursor:pointer;
+    padding:9px 14px; border-radius:7px; border:1px solid var(--line); background:#fff; color:var(--ink);
+  }
+  button.action.primary{ background:var(--leaf); border-color:var(--leaf); color:#fff; }
+  button.action.danger{ background:none; border-color:var(--danger); color:var(--danger); }
+  button.action:disabled{ opacity:0.5; cursor:default; }
+
+  table.history{ width:100%; border-collapse:collapse; font-size:12px; margin-top:6px; }
+  table.history th{ text-align:left; font-weight:600; color:var(--ink-soft); font-size:10.5px; text-transform:uppercase; letter-spacing:0.03em; padding:4px 4px; border-bottom:1px solid var(--line); }
+  table.history td{ padding:4px 4px; border-bottom:1px solid var(--line); vertical-align:top; }
+  table.history input{ width:100%; border:none; background:transparent; font-size:12px; font-family:'JetBrains Mono',monospace; padding:2px; }
+  table.history input:focus{ background:rgba(91,58,92,0.08); border-radius:4px; }
+  .history-year-label{ font-family:'JetBrains Mono',monospace; font-weight:600; }
+  .remove-row{ background:none; border:none; color:var(--danger); cursor:pointer; font-size:13px; }
+
+  .drawer-section{ margin-top:22px; }
+  .drawer-section h3{ font-size:13px; margin:0 0 8px; text-transform:uppercase; letter-spacing:0.04em; color:var(--ink-soft); font-weight:600; }
+
+  #toast{
+    position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--ink); color:#fff; padding:10px 18px; border-radius:8px; font-size:13px;
+    opacity:0; transition:all 0.25s ease; z-index:2000; pointer-events:none;
+  }
+  #toast.visible{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  .bottom-bar{
+    display:flex; align-items:center; gap:8px; padding:10px 20px;
+    border-top:1px solid var(--line); background:var(--paper-raised); flex-shrink:0;
+  }
+  .bottom-bar input[type=text]{ flex:1; padding:7px 10px; border:1px solid var(--line); border-radius:6px; font-size:12.5px; font-family:'Inter',sans-serif; min-width:0; }
+  .bottom-bar label{ font-size:11.5px; color:var(--ink-soft); white-space:nowrap; }
+  .bottom-bar .map-btn{ white-space:nowrap; padding:8px 12px; }
+
+  /* ---------- Photos ---------- */
+  .photo-field{ display:flex; gap:10px; align-items:flex-start; }
+  .photo-thumb{
+    width:84px; height:84px; border-radius:8px; object-fit:cover; background:var(--paper);
+    border:1px solid var(--line); flex-shrink:0;
+  }
+  .photo-thumb.empty{ display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--ink-soft); text-align:center; padding:4px; }
+  .photo-controls{ display:flex; flex-direction:column; gap:6px; }
+  .photo-controls input[type=file]{ font-size:11.5px; max-width:180px; }
+  .photo-remove-link{ font-size:11px; color:var(--danger); background:none; border:none; cursor:pointer; text-align:left; padding:0; }
+  .photo-gallery{ display:flex; gap:10px; margin-top:8px; }
+  .photo-gallery figure{ margin:0; text-align:center; }
+  .photo-gallery img{ width:120px; height:120px; object-fit:cover; border-radius:9px; border:1px solid var(--line); display:block; }
+  .photo-gallery figcaption{ font-size:10.5px; color:var(--ink-soft); margin-top:4px; }
+  .photo-loading{ font-size:11.5px; color:var(--ink-soft); padding:6px 0; }
+
+  .regional-card{
+    background:rgba(92,122,78,0.08); border:1px solid rgba(92,122,78,0.25);
+    border-radius:10px; padding:12px 14px; font-size:12.5px; line-height:1.5; margin:14px 0;
+  }
+  .regional-card .rc-title{ font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:0.04em; color:var(--leaf); margin-bottom:5px; }
+  .regional-card .rc-row{ display:flex; gap:16px; margin-top:4px; }
+  .regional-card .rc-row span.label{ color:var(--ink-soft); }
+
+  /* ---------- Fruit pins ---------- */
+  .tree-pin{ background:none !important; border:none !important; }
+  .pin-body{
+    width:30px; height:30px; border-radius:50% 50% 50% 4px; transform:rotate(45deg);
+    display:flex; align-items:center; justify-content:center;
+    border:2px solid rgba(255,255,255,0.9);
+  }
+  .pin-body .pin-emoji{ transform:rotate(-45deg); font-size:15px; line-height:1; }
+
+  /* ---------- Zoomed-out dot markers ---------- */
+  .tree-pin-dot{ background:none !important; border:none !important; }
+  .dot-body{
+    width:14px; height:14px; border-radius:50%;
+    border:2.5px solid rgba(255,255,255,0.9);
+    box-shadow:0 1px 3px rgba(0,0,0,0.3);
+  }
+
+  /* ---------- Cluster icons ---------- */
+  .tree-cluster{ background:none !important; border:none !important; }
+  .cluster-body{
+    background:var(--leaf); color:#fff; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-family:'JetBrains Mono',monospace; font-weight:600;
+    border:3px solid rgba(255,255,255,0.85); box-shadow:0 2px 6px rgba(35,43,34,0.25);
+  }
+
+  /* ---------- Filter bar ---------- */
+  .filter-bar{ padding:10px 16px 4px; border-top:1px solid var(--line); }
+  .filter-row{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+  .filter-chip{
+    display:flex; align-items:center; gap:4px; padding:4px 9px; border-radius:14px;
+    border:1.5px solid var(--line); font-size:11px; cursor:pointer; background:#fff; user-select:none;
+  }
+  .filter-chip.selected{ border-color:var(--ink); background:var(--ink); color:#fff; }
+  .filter-select{
+    font-size:12px; padding:6px 8px; border-radius:7px; border:1px solid var(--line);
+    background:#fff; font-family:'Inter',sans-serif; width:100%; margin-bottom:8px;
+  }
+  .filter-search{
+    font-size:12px; padding:6px 9px; border-radius:7px; border:1px solid var(--line);
+    background:#fff; font-family:'Inter',sans-serif; width:100%;
+  }
+  .filter-clear{ font-size:11px; color:var(--ink-soft); background:none; border:none; cursor:pointer; padding:0 0 6px; text-decoration:underline; }
+
+  /* ---------- Ripeness log ---------- */
+  .ripeness-btns{ display:flex; gap:8px; flex-wrap:wrap; }
+  .ripeness-btn{ min-width:70px; }
+  .ripeness-btn{
+    flex:1; padding:11px 6px; border-radius:9px; border:1.5px solid var(--line);
+    background:#fff; font-family:'Inter',sans-serif; font-size:12px; font-weight:600; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; gap:3px;
+  }
+  .ripeness-btn .rdot{ width:9px; height:9px; border-radius:50%; }
+  .ripeness-btn.flowering .rdot{ background:var(--bloom); }
+  .ripeness-btn.under .rdot{ background:var(--ink-soft); }
+  .ripeness-btn.ready .rdot{ background:var(--leaf); }
+  .ripeness-btn.over .rdot{ background:var(--danger); }
+  .ripeness-btn:hover{ background:var(--paper); }
+  .ripeness-note-input{
+    width:100%; margin-top:8px; padding:8px 9px; border:1px solid var(--line); border-radius:7px;
+    font-size:12.5px; font-family:'Inter',sans-serif;
+  }
+  .log-timeline{ margin-top:12px; }
+  .log-entry{ display:flex; gap:8px; padding:7px 0; border-top:1px solid var(--line); font-size:12px; }
+  .log-entry .rdot{ width:8px; height:8px; border-radius:50%; margin-top:4px; flex-shrink:0; }
+  .log-entry .le-date{ font-family:'JetBrains Mono',monospace; color:var(--ink-soft); font-size:11px; white-space:nowrap; }
+  .log-entry .le-meta{ color:var(--ink-soft); font-size:11px; }
+  .log-empty{ font-size:12px; color:var(--ink-soft); padding:6px 0; }
+
+  @media (max-width: 760px){
+    main.layout{ flex-direction:column; }
+    #sidebar{ width:100%; border-left:none; border-top:1px solid var(--line); max-height:38vh; }
+    #map-pane{ flex:1 1 auto; min-height:200px; }
+    #drawer{ width:100vw; }
+
+    header.top{ padding:10px 14px 8px; }
+    header.top h1{ font-size:18px; }
+    header.top .tagline{ display:none; }
+    header.top .banner{ font-size:10.5px; }
+
+    .bottom-bar{ padding:8px 10px; gap:6px; }
+    .bottom-bar label{ display:none; }
+    .bottom-bar input[type=text]{ font-size:12px; padding:6px 8px; }
+    .bottom-bar .btn-label{ display:none; }
+    .bottom-bar .map-btn{ padding:8px 10px; }
+
+    .map-controls{ flex-wrap:wrap; max-width:calc(100vw - 24px); }
+    .map-controls .map-btn{ font-size:12px; padding:7px 10px; }
+    .location-search-box{ width:min(220px, calc(100vw - 100px)); }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand">
+      <h1>🍃 Windfall</h1>
+    </div>
+    <div class="tagline">Map the fruit trees near you, and know when they'll be ready.</div>
+    <div class="banner"><span class="dot"></span>Trees you add here are visible to anyone who opens this map — share the link with neighbors to build it together.</div>
+    <div class="banner" id="storage-warning" style="display:none; color:var(--danger);"><span class="dot" style="background:var(--danger);"></span>Saving isn't available right now — see note below.</div>
+    <div class="row-divider"></div>
+  </header>
+
+  <div id="export-modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(35,43,34,0.4); z-index:1500; align-items:center; justify-content:center;">
+    <div style="background:var(--paper-raised); border-radius:12px; padding:20px; width:min(560px,90vw); max-height:80vh; display:flex; flex-direction:column;">
+      <h3 style="margin:0 0 8px;">Your data export</h3>
+      <div style="font-size:12.5px; color:var(--ink-soft); margin-bottom:10px;">A download should start automatically. If it doesn't, tap inside the box below, select all, and copy — then paste into a text file to save it.</div>
+      <textarea id="export-textarea" readonly style="flex:1; min-height:240px; font-family:'JetBrains Mono',monospace; font-size:11px; padding:10px; border:1px solid var(--line); border-radius:8px;"></textarea>
+      <button class="action primary" id="export-modal-close" style="margin-top:10px; align-self:flex-end;">Done</button>
+    </div>
+  </div>
+
+  <main class="layout">
+    <div id="map-pane">
+      <div id="map"></div>
+      <div class="map-controls">
+        <button class="map-btn primary" id="locate-btn">📍 Use my location</button>
+        <button class="map-btn" id="add-btn">＋ Add a tree</button>
+        <button class="map-btn" id="toggle-trees-btn">🌳 Trees (0)</button>
+      </div>
+      <div class="map-controls" style="top:auto; bottom:12px; right:12px; left:auto;">
+        <input type="text" id="location-search-input" class="location-search-box" placeholder="Or search a city, zip, or neighborhood…">
+        <button class="map-btn" id="location-search-btn">Go</button>
+      </div>
+      <div class="add-hint" id="add-hint">Tap the map where the tree is</div>
+    </div>
+    <div id="sidebar" class="hidden">
+      <div class="sidebar-head">
+        <h2>Trees on this map</h2>
+        <div class="count" id="tree-count">0 trees logged</div>
+      </div>
+      <div class="filter-bar">
+        <input type="text" class="filter-search" id="filter-search" placeholder="Search name, variety, notes…">
+        <div class="filter-row" id="filter-fruit-row" style="margin-top:8px;"></div>
+        <select class="filter-select" id="filter-when">
+          <option value="all">Any ripeness</option>
+          <option value="flowering">Flowering</option>
+          <option value="ready">Ready to pick now</option>
+          <option value="soon">Ripening soon</option>
+        </select>
+        <button class="filter-clear" id="filter-clear">Clear filters</button>
+      </div>
+      <div id="tree-list"></div>
+    </div>
+  </main>
+
+  <footer class="bottom-bar">
+    <label for="my-name-input">Your name on new entries:</label>
+    <input type="text" id="my-name-input" placeholder="e.g. Sam, Elm St">
+    <button class="map-btn" id="export-data-btn">⬇ <span class="btn-label">Export</span></button>
+    <button class="map-btn" id="import-data-btn">⬆ <span class="btn-label">Import</span></button>
+    <input type="file" id="import-file-input" accept=".json" style="display:none;">
+  </footer>
+  <div style="text-align:center; padding:4px 0; font-size:10.5px; color:var(--ink-soft); background:var(--paper-raised); border-top:1px solid var(--line);">
+    This site is powered by <a href="https://www.netlify.com" target="_blank" rel="noopener" style="color:var(--ink-soft);">Netlify</a>
+  </div>
+</div>
+
+<div id="overlay">
+  <div id="drawer"></div>
+</div>
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js" crossorigin="anonymous"></script>
+<script>
+(function(){
+
+// ---------- Supabase config ----------
+// The anon/public key is designed to be embedded in client-side code like this —
+// your data is protected by the Row Level Security policies on the project itself, not by hiding this key.
+const SUPABASE_URL = 'https://mvsgjshdtotrcytucpqf.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im12c2dqc2hkdG90cmN5dHVjcHFmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3MTUzOTgsImV4cCI6MjA5OTI5MTM5OH0.beSsHbKAbSbqxo39cgau6hi10Q7Do6YYOg54_STu9Lw';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const PHOTO_BUCKET = 'tree-photos';
+
+// Common named varieties per fruit type, for the variety autocomplete field.
+// Not exhaustive — just enough well-known names to jog memory or suggest what to look for.
+const VARIETY_SUGGESTIONS = {
+  apple: ["Honeycrisp","Gala","Fuji","Granny Smith","Golden Delicious","Red Delicious","Braeburn","Pink Lady","McIntosh"],
+  pear: ["Bartlett","Anjou","Bosc","Comice","Seckel","Concorde"],
+  peach: ["Elberta","Redhaven","Cresthaven","O'Henry","Belle of Georgia"],
+  plum: ["Santa Rosa","Methley","Satsuma","Green Gage","Damson","Shiro"],
+  apricot: ["Blenheim","Moorpark","Tilton","Goldcot","Katy"],
+  fig: ["Brown Turkey","Black Mission","Celeste","Kadota","Chicago Hardy","Desert King"],
+  citrus: ["Meyer Lemon","Valencia Orange","Navel Orange","Eureka Lemon","Satsuma Mandarin","Key Lime","Cara Cara"],
+  cherry: ["Bing","Rainier","Montmorency","Stella","Lapins","Black Tartarian"],
+  grape: ["Concord","Thompson Seedless","Niagara","Flame Seedless","Muscadine"],
+  pomegranate: ["Wonderful","Angel Red","Parfianka","Granada"],
+  persimmon: ["Fuyu","Hachiya","Jiro"],
+  elderberry: ["York","Adams","Johns","Nova","Scotia"],
+  gooseberry: ["Pixwell","Poorman","Hinnomaki Red","Captivator","Invicta"],
+  mulberry: ["Illinois Everbearing","Pakistan","Black Beauty","Dwarf Everbearing","Shangri-La"],
+  blackberry: ["Triple Crown","Chester","Navaho","Ouachita","Apache"],
+  raspberry: ["Heritage","Latham","Fall Gold","Caroline","Anne"],
+  serviceberry: ["Autumn Brilliance","Regent","Smoky","Northline"],
+  goji: ["Crimson Star","Phoenix Tears","Big Lifeberry","Sweet Lifeberry"],
+  currant: ["Red Lake","Rovada","White Imperial","Pink Champagne","Consort"],
+  quince: ["Smyrna","Pineapple","Orange","Aromatnaya","Van Deman"],
+  kiwi: ["Hayward","Issai","Anna","Ken's Red"],
+  pawpaw: ["Sunflower","Susquehanna","Shenandoah","Overleese","PA-Golden","Mango"],
+  loquat: ["Gold Nugget","Champagne","Big Jim","Advance"],
+  passionfruit: ["Purple","Golden/Yellow","Frederick","Possum Purple","Panama Gold"],
+  asianpear: ["Hosui","Shinseiki","Twentieth Century","Chojuro","Korean Giant","Kosui","Shinko"],
+  blueberry: ["Bluecrop","Duke","Patriot","Northsky","Legacy"],
+  other: []
+};
+
+const FRUIT_INFO = {
+  apple:      { label:"Apple",       emoji:"🍎", color:getCss('--c-apple'),      climacteric:true,  baseTempC:10, advice:"Apples keep softening and sweetening after picking. You can pick a little early and let them finish indoors — useful if squirrels are racing you for them." },
+  pear:       { label:"Pear",        emoji:"🍐", color:getCss('--c-pear'),       climacteric:true,  baseTempC:7,  advice:"Pears are the classic case: pick while still firm and let them finish ripening at room temperature. Ripening on the tree often turns mealy." },
+  peach:      { label:"Peach / Nectarine", emoji:"🍑", color:getCss('--c-peach'), climacteric:true,  baseTempC:7,  advice:"Peaches continue to soften after picking, though the best flavor comes from leaving them on the tree as long as you can stand to wait." },
+  plum:       { label:"Plum",        emoji:svgGlossyDrupe(getCss('--c-plum'), true), color:getCss('--c-plum'),       climacteric:true,  baseTempC:7,  advice:"Plums soften after harvest, but sugar won't increase much more once picked — wait for full color before picking." },
+  apricot:    { label:"Apricot",     emoji:svgGlossyDrupe(getCss('--c-apricot'), true), color:getCss('--c-apricot'),    climacteric:true,  baseTempC:7,  advice:"Apricots soften off the tree, but like plums, sugar development mostly stops at picking — color is your best cue." },
+  fig:        { label:"Fig",         emoji:svgFig(getCss('--c-fig')), color:getCss('--c-fig'),        climacteric:true,  baseTempC:13, advice:"Figs ripen only a little after picking. For the best sweetness, wait until they're fully colored and slightly soft to the touch on the tree." },
+  citrus:     { label:"Citrus",      emoji:"🍊", color:getCss('--c-citrus'),     climacteric:false, baseTempC:13, advice:"Citrus does not ripen after picking — sugar and acid are fixed at harvest. Color can be misleading too; taste-test before a big pick." },
+  cherry:     { label:"Cherry",      emoji:"🍒", color:getCss('--c-cherry'),     climacteric:false, baseTempC:7,  advice:"Cherries won't get any sweeter once picked. Always taste a few before committing to a full harvest." },
+  grape:      { label:"Grape",       emoji:"🍇", color:getCss('--c-grape'),      climacteric:false, baseTempC:10, advice:"Grapes don't ripen further off the vine — sugar content is locked in the moment you pick." },
+  pomegranate:{ label:"Pomegranate", emoji:svgCrownedFruit(getCss('--c-pomegranate')), color:getCss('--c-pomegranate'),climacteric:false, baseTempC:10, advice:"Pomegranates don't continue ripening after picking. Wait for deep color and a heavy, slightly metallic sound when tapped." },
+  persimmon:  { label:"Persimmon",   emoji:svgCrownedFruit(getCss('--c-persimmon')), color:getCss('--c-persimmon'),  climacteric:true,  baseTempC:10, advice:"Persimmons (especially astringent varieties like Hachiya) keep softening after picking — often necessary before they're pleasant to eat." },
+  elderberry: { label:"Elderberry",  emoji:svgUmbelCluster(getCss('--c-elderberry')), color:getCss('--c-elderberry'), climacteric:false, baseTempC:7,  advice:"Elderberries don't ripen further after picking — harvest whole clusters once fully dark purple-black and drooping. Note: raw or unripe elderberries (and the plant's stems/leaves) can cause nausea, so only eat fully ripe berries and cook them before eating." },
+  gooseberry: { label:"Gooseberry",  emoji:svgStripedBerry(getCss('--c-gooseberry')), color:getCss('--c-gooseberry'), climacteric:false, baseTempC:6,  advice:"Gooseberries don't sweeten further after picking. Some pick them slightly underripe and tart for cooking, and fully ripe and sweet for eating fresh." },
+  mulberry:   { label:"Mulberry",    emoji:svgDrupeletCluster(getCss('--c-mulberry')), color:getCss('--c-mulberry'),   climacteric:false, baseTempC:8,  advice:"Mulberries don't ripen after picking and are very perishable — they're ready when they release into your hand with a gentle tug, and are best used the same day." },
+  blackberry: { label:"Blackberry",  emoji:svgDrupeletCluster(getCss('--c-blackberry')), color:getCss('--c-blackberry'), climacteric:false, baseTempC:7,  advice:"Blackberries won't get any sweeter once picked — wait until they pull away from the stem easily and have lost any red tinge." },
+  raspberry:  { label:"Raspberry",   emoji:svgDrupeletCluster(getCss('--c-raspberry')), color:getCss('--c-raspberry'),  climacteric:false, baseTempC:6,  advice:"Raspberries don't ripen further after picking — fully ripe berries slide off the central core easily." },
+  blueberry:  { label:"Blueberry",   emoji:"🫐", color:getCss('--c-blueberry'),  climacteric:false, baseTempC:7,  advice:"Blueberries don't get much sweeter after picking. Full blue color is a start, but taste-testing is the reliable way to know they've hit peak sweetness." },
+  serviceberry:{ label:"Serviceberry", emoji:svgGlossyDrupe(getCss('--c-serviceberry'), false), color:getCss('--c-serviceberry'), climacteric:false, baseTempC:5, advice:"Serviceberries (juneberries/saskatoons) don't ripen further off the bush — harvest when deep red-purple and soft, similar to a ripe blueberry." },
+  goji:       { label:"Goji berry",  emoji:svgGlossyOval(getCss('--c-goji'), false), color:getCss('--c-goji'),      climacteric:false, baseTempC:8,  advice:"Goji berries don't continue ripening after picking — harvest when fully red and slightly soft; many people dry them shortly after picking." },
+  currant:    { label:"Currant",     emoji:svgStrandCluster(getCss('--c-currant')), color:getCss('--c-currant'),    climacteric:false, baseTempC:5,  advice:"Currants don't sweeten further after picking — harvest by the cluster (\"strig\") once berries are fully colored, red, black, or white depending on variety." },
+  quince:     { label:"Quince",      emoji:svgLumpyRound(getCss('--c-quince')), color:getCss('--c-quince'),     climacteric:true,  baseTempC:7,  advice:"Quince keeps softening and turns more fragrant after picking, similar to pears — many growers pick when firm and golden and let them finish ripening indoors." },
+  kiwi:       { label:"Kiwi",        emoji:"🥝", color:getCss('--c-kiwi'),       climacteric:true,  baseTempC:8,  advice:"Kiwifruit is a classic climacteric fruit — it's almost always picked hard and unripe, then ripened off the vine over one to two weeks." },
+  pawpaw:     { label:"Pawpaw",      emoji:svgGlossyOval(getCss('--c-pawpaw'), true), color:getCss('--c-pawpaw'),     climacteric:true,  baseTempC:10, advice:"Pawpaws continue to ripen after picking and soften quickly — many foragers pick them once they detach easily while still slightly firm, then finish ripening indoors over a few days." },
+  loquat:     { label:"Loquat",      emoji:svgGlossyOval(getCss('--c-loquat'), false), color:getCss('--c-loquat'),     climacteric:false, baseTempC:12, advice:"Loquats don't continue to ripen after picking — wait until fully colored and slightly soft, since flavor won't improve once picked." },
+  passionfruit:{ label:"Passion fruit", emoji:svgLumpyRound(getCss('--c-passionfruit')), color:getCss('--c-passionfruit'), climacteric:true, baseTempC:12, advice:"Passion fruit keeps ripening after picking — the skin wrinkles over about a week as it develops fuller flavor. Ripe fruit often drops from the vine on its own, so a good rule is to pick up windfalls daily rather than pulling fruit off early." },
+  asianpear:  { label:"Asian pear",   emoji:svgGlossyDrupe(getCss('--c-asianpear'), false), color:getCss('--c-asianpear'), climacteric:false, baseTempC:7, advice:"Unlike European pears, Asian pears don't ripen further after picking — they're round and crisp like an apple, so wait until they're fully sweet and juicy on the tree before harvesting." },
+  other:      { label:"Other",       emoji:"🌳", color:getCss('--c-other'),      climacteric:null,  baseTempC:10, advice:"Not sure yet whether this fruit keeps ripening after picking (climacteric) or must ripen fully on the tree (non-climacteric) — worth a quick search for this species." },
+};
+function getCss(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+// Small hand-drawn fruit silhouettes for types with no good native emoji —
+// grouped into a few reusable shape families so the icon set stays visually consistent.
+function lighten(hex, ratio){
+  hex = (hex || '#888888').replace('#','');
+  if(hex.length === 3) hex = hex.split('').map(c=>c+c).join('');
+  const num = parseInt(hex, 16);
+  let r = (num >> 16), g = ((num >> 8) & 0xff), b = num & 0xff;
+  r = Math.round(r + (255 - r) * ratio);
+  g = Math.round(g + (255 - g) * ratio);
+  b = Math.round(b + (255 - b) * ratio);
+  return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+function darken(hex, amt){
+  hex = (hex || '#888888').replace('#','');
+  if(hex.length === 3) hex = hex.split('').map(c=>c+c).join('');
+  const num = parseInt(hex, 16);
+  let r = (num >> 16) - amt, g = ((num >> 8) & 0xff) - amt, b = (num & 0xff) - amt;
+  r = Math.max(0, Math.min(255, r)); g = Math.max(0, Math.min(255, g)); b = Math.max(0, Math.min(255, b));
+  return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+function svgToImg(svg){
+  const withNs = svg.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
+  const encoded = encodeURIComponent(withNs).replace(/'/g, '%27').replace(/\(/g, '%28').replace(/\)/g, '%29');
+  return `<img src="data:image/svg+xml,${encoded}" width="18" height="18" style="display:block;" alt="">`;
+}
+function stemPath(){ return `<path d="M12.5 4.5 Q11 1.8 8 2.4" stroke="#4a6b3a" stroke-width="1.5" fill="none" stroke-linecap="round"/>`; }
+// Round stone fruit — plum, apricot, serviceberry: glossy circle with a cleft line and shine
+function svgGlossyDrupe(color, cleft){
+  const outline = darken(color, 30);
+  const svg = `<svg viewBox="0 0 24 24" width="18" height="18">
+    <circle cx="12" cy="13" r="8.5" fill="${color}" stroke="${outline}" stroke-width="0.8"/>
+    ${cleft ? `<path d="M12 5 Q13 13 12 21" stroke="${outline}" stroke-width="0.9" fill="none" opacity="0.55"/>` : ''}
+    <ellipse cx="9" cy="9.5" rx="2.6" ry="1.7" fill="rgba(255,255,255,0.5)" transform="rotate(-25 9 9.5)"/>
+    ${stemPath()}
+  </svg>`;
+  return svgToImg(svg);
+}
+// Crowned fruit — pomegranate, persimmon: round with a pointed calyx crown
+function svgCrownedFruit(color){
+  const outline = darken(color, 30);
+  const svg = `<svg viewBox="0 0 24 24" width="18" height="18">
+    <circle cx="12" cy="14" r="8" fill="${color}" stroke="${outline}" stroke-width="0.8"/>
+    <ellipse cx="9" cy="10.5" rx="2.4" ry="1.5" fill="rgba(255,255,255,0.45)" transform="rotate(-20 9 10.5)"/>
+    <path d="M8.5 6.5 L12 4 L15.5 6.5 L14.3 3 L12 5 L9.7 3 Z" fill="#4a6b3a"/>
+  </svg>`;
+  return svgToImg(svg);
+}
+// Fig — teardrop bulb with a tiny ostiole mark and short stem
+function svgFig(color){
+  const outline = darken(color, 30);
+  const svg = `<svg viewBox="0 0 24 24" width="18" height="18">
+    <path d="M12 4.5 C8.3 6.5 6.3 10.3 6.8 15 C7.2 19 9.6 21.8 12 21.8 C14.4 21.8 16.8 19 17.2 15 C17.7 10.3 15.7 6.5 12 4.5 Z" fill="${color}" stroke="${outline}" stroke-width="0.8"/>
+    <ellipse cx="9.5" cy="12.5" rx="1.7" ry="1.2" fill="rgba(255,255,255,0.35)"/>
+    <circle cx="12" cy="21" r="0.8" fill="rgba(0,0,0,0.3)"/>
+    <path d="M12 5 Q11.3 2.6 9.5 2.9" stroke="#4a6b3a" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+  </svg>`;
+  return svgToImg(svg);
+}
+// Compound drupelet cluster — blackberry, raspberry, mulberry: dome of small overlapping bumps
+function svgDrupeletCluster(color){
+  const outline = darken(color, 25);
+  const dots = [[9,16.5],[15,16.5],[12,17.3],[8.5,13],[15.5,13],[12,13.8],[10,10],[14,10]];
+  const circles = dots.map(([x,y])=>`<circle cx="${x}" cy="${y}" r="2.3" fill="${color}" stroke="${outline}" stroke-width="0.5"/>`).join('');
+  const svg = `<svg viewBox="0 0 24 24" width="18" height="18">
+    ${circles}
+    <path d="M11.5 8.2 Q10.6 5.8 8.2 6.2" stroke="#4a6b3a" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+  </svg>`;
+  return svgToImg(svg);
+}
+// Flat umbel cluster — elderberry: many tiny berries fanned out from one stem
+function svgUmbelCluster(color){
+  const outline = darken(color, 25);
+  const dots = [[6.5,10],[9.5,8],[12,7],[14.5,8],[17.5,10],[8,13.5],[11,12.5],[13,12.5],[16,13.5],[12,16]];
+  const circles = dots.map(([x,y])=>`<circle cx="${x}" cy="${y}" r="1.9" fill="${color}" stroke="${outline}" stroke-width="0.5"/>`).join('');
+  const svg = `<svg viewBox="0 0 24 24" width="18" height="18">
+    <path d="M12 16 Q12 11 12 6" stroke="#4a6b3a" stroke-width="1" fill="none" opacity="0.6"/>
+    ${circles}
+  </svg>`;
+  return svgToImg(svg);
+}
+// Hanging strand cluster — currant: small berries in a vertical string
+function svgStrandCluster(color){
+  const outline = darken(color, 25);
+  const dots = [[12,7.5],[10.7,11],[13.3,11],[12,14.5],[10.5,18],[13.5,18]];
+  const circles = dots.map(([x,y])=>`<circle cx="${x}" cy="${y}" r="2" fill="${color}" stroke="${outline}" stroke-width="0.5"/>`).join('');
+  const svg = `<svg viewBox="0 0 24 24" width="18" height="18">
+    <path d="M12 7 Q11.7 4.5 9.5 3.6" stroke="#4a6b3a" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+    ${circles}
+  </svg>`;
+  return svgToImg(svg);
+}
+// Striped translucent berry — gooseberry: oval with faint veining
+function svgStripedBerry(color){
+  const outline = darken(color, 30);
+  const svg = `<svg viewBox="0 0 24 24" width="18" height="18">
+    <ellipse cx="12" cy="13.5" rx="7" ry="8" fill="${color}" stroke="${outline}" stroke-width="0.8"/>
+    <path d="M12 6.5 Q10.5 13.5 12 20.5 M9.3 7.5 Q8.5 13.5 9.6 19.5 M14.7 7.5 Q15.5 13.5 14.4 19.5" stroke="${outline}" stroke-width="0.6" fill="none" opacity="0.55"/>
+    <ellipse cx="9.2" cy="9.5" rx="2" ry="1.3" fill="rgba(255,255,255,0.4)" transform="rotate(-20 9.2 9.5)"/>
+    ${stemPath()}
+  </svg>`;
+  return svgToImg(svg);
+}
+// Small glossy oval — goji, loquat: smooth little berry
+function svgGlossyOval(color, big){
+  const outline = darken(color, 30);
+  const rx = big ? 6.6 : 5.4, ry = big ? 9 : 8;
+  const svg = `<svg viewBox="0 0 24 24" width="18" height="18">
+    <ellipse cx="12" cy="13" rx="${rx}" ry="${ry}" fill="${color}" stroke="${outline}" stroke-width="0.8"/>
+    <ellipse cx="9.3" cy="9" rx="2" ry="1.3" fill="rgba(255,255,255,0.45)" transform="rotate(-20 9.3 9)"/>
+    ${stemPath()}
+  </svg>`;
+  return svgToImg(svg);
+}
+// Lumpy irregular round — quince: bumpy, uneven outline like a knobbly pear-apple
+function svgLumpyRound(color){
+  const outline = darken(color, 30);
+  const svg = `<svg viewBox="0 0 24 24" width="18" height="18">
+    <path d="M12 5 C15.5 5 18.5 7 18.5 12 C18.5 14.5 18 16 17 18 C15.8 20.3 14 21.8 12 21.8 C10 21.8 8.2 20.3 7 18 C6 16 5.5 14.5 5.5 12 C5.5 7 8.5 5 12 5 Z" fill="${color}" stroke="${outline}" stroke-width="0.9"/>
+    <ellipse cx="9" cy="10.5" rx="2.3" ry="1.5" fill="rgba(255,255,255,0.4)" transform="rotate(-20 9 10.5)"/>
+    ${stemPath()}
+  </svg>`;
+  return svgToImg(svg);
+}
+
+
+// Rough regional bloom/harvest windows by climate band, Northern Hemisphere baseline.
+// Not location-precise — a starting estimate until a tree has its own logged history.
+// null = not commonly grown / too marginal in this band to estimate.
+const REGIONAL_BANDS = {
+  cold:          { label:"Cold / northern temperate" }, // |lat| >= 45
+  temperate:     { label:"Temperate" },                  // 35–45
+  mediterranean: { label:"Warm temperate / Mediterranean" }, // 28–35
+  subtropical:   { label:"Subtropical" }                 // < 28
+};
+const REGIONAL_HARVEST = {
+  cold:          { apple:{bloom:[5],harvest:[9,10]}, pear:{bloom:[5],harvest:[9]}, peach:{bloom:[5],harvest:[8,9]}, plum:{bloom:[5],harvest:[8]}, apricot:{bloom:[4],harvest:[7,8]}, cherry:{bloom:[5],harvest:[7]}, fig:null, citrus:null, grape:{bloom:[6],harvest:[9,10]}, pomegranate:null, persimmon:{bloom:[6],harvest:[10]},
+    elderberry:{bloom:[6],harvest:[8,9]}, gooseberry:{bloom:[5],harvest:[7]}, mulberry:{bloom:[5],harvest:[7]}, blackberry:{bloom:[6],harvest:[8]}, raspberry:{bloom:[6],harvest:[7,8]}, blueberry:{bloom:[5],harvest:[7,8]}, serviceberry:{bloom:[5],harvest:[7]}, goji:{bloom:[6],harvest:[8,9]}, currant:{bloom:[5],harvest:[7]}, quince:{bloom:[5],harvest:[10]}, kiwi:null, pawpaw:{bloom:[5],harvest:[9,10]}, loquat:null, passionfruit:null, asianpear:{bloom:[5],harvest:[9]}, other:null },
+  temperate:     { apple:{bloom:[4],harvest:[8,9,10]}, pear:{bloom:[4],harvest:[8,9]}, peach:{bloom:[4],harvest:[7,8]}, plum:{bloom:[4],harvest:[6,7,8]}, apricot:{bloom:[3],harvest:[6,7]}, cherry:{bloom:[4],harvest:[6]}, fig:{bloom:[5],harvest:[8,9]}, citrus:null, grape:{bloom:[5],harvest:[9]}, pomegranate:{bloom:[6],harvest:[9,10]}, persimmon:{bloom:[5],harvest:[10,11]},
+    elderberry:{bloom:[5,6],harvest:[8]}, gooseberry:{bloom:[4],harvest:[6,7]}, mulberry:{bloom:[4],harvest:[6,7]}, blackberry:{bloom:[5],harvest:[7,8]}, raspberry:{bloom:[5],harvest:[6,7]}, blueberry:{bloom:[4],harvest:[7]}, serviceberry:{bloom:[4],harvest:[6]}, goji:{bloom:[5],harvest:[8]}, currant:{bloom:[4],harvest:[6,7]}, quince:{bloom:[4],harvest:[9,10]}, kiwi:{bloom:[5],harvest:[10]}, pawpaw:{bloom:[4],harvest:[9]}, loquat:null, passionfruit:null, asianpear:{bloom:[4],harvest:[8,9]}, other:null },
+  mediterranean: { apple:{bloom:[3,4],harvest:[7,8,9]}, pear:{bloom:[3],harvest:[7,8]}, peach:{bloom:[3],harvest:[6,7]}, plum:{bloom:[3],harvest:[5,6,7]}, apricot:{bloom:[2],harvest:[5,6]}, cherry:{bloom:[3],harvest:[5,6]}, fig:{bloom:[4],harvest:[6,7,8,9]}, citrus:{bloom:[4],harvest:[11,12,1,2,3]}, grape:{bloom:[4],harvest:[8,9]}, pomegranate:{bloom:[5],harvest:[9,10]}, persimmon:{bloom:[4],harvest:[10,11]},
+    elderberry:{bloom:[4,5],harvest:[7]}, gooseberry:{bloom:[3],harvest:[5,6]}, mulberry:{bloom:[3],harvest:[5,6]}, blackberry:{bloom:[4],harvest:[6,7]}, raspberry:{bloom:[4],harvest:[5,6]}, blueberry:{bloom:[3],harvest:[6]}, serviceberry:{bloom:[3],harvest:[5]}, goji:{bloom:[4],harvest:[7]}, currant:{bloom:[3],harvest:[5,6]}, quince:{bloom:[3],harvest:[9]}, kiwi:{bloom:[4],harvest:[9,10]}, pawpaw:{bloom:[3],harvest:[8,9]}, loquat:{bloom:[10,11],harvest:[3,4]}, passionfruit:{bloom:[5,6],harvest:[9,10,11]}, asianpear:{bloom:[3],harvest:[7,8]}, other:null },
+  subtropical:   { apple:{bloom:[2,3],harvest:[6,7]}, pear:{bloom:[2],harvest:[6,7]}, peach:{bloom:[2],harvest:[5,6]}, plum:{bloom:[2],harvest:[4,5,6]}, apricot:{bloom:[1],harvest:[4,5]}, cherry:null, fig:{bloom:[3],harvest:[6,7,8,9,10,11]}, citrus:{bloom:[3],harvest:[10,11,12,1,2]}, grape:{bloom:[3],harvest:[7,8]}, pomegranate:{bloom:[4],harvest:[8,9,10]}, persimmon:{bloom:[3],harvest:[9,10,11]},
+    elderberry:null, gooseberry:null, mulberry:{bloom:[2],harvest:[4,5]}, blackberry:{bloom:[3],harvest:[5]}, raspberry:null, blueberry:{bloom:[2],harvest:[4,5]}, serviceberry:null, goji:{bloom:[3],harvest:[6]}, currant:null, quince:{bloom:[2],harvest:[8]}, kiwi:null, pawpaw:{bloom:[2],harvest:[8]}, loquat:{bloom:[10,11],harvest:[2,3]}, passionfruit:{bloom:[3,4,5],harvest:[7,8,9,10]}, asianpear:{bloom:[2],harvest:[6,7]}, other:null }
+};
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function getClimateBand(lat){
+  const a = Math.abs(lat);
+  if(a >= 45) return 'cold';
+  if(a >= 35) return 'temperate';
+  if(a >= 28) return 'mediterranean';
+  return 'subtropical';
+}
+function shiftMonths(arr, isSouthern){
+  if(!isSouthern) return arr;
+  return arr.map(m => ((m + 6 - 1) % 12) + 1);
+}
+function monthRangeLabel(arr){
+  if(!arr || !arr.length) return '—';
+  if(arr.length === 1) return MONTH_NAMES[arr[0]-1];
+  return `${MONTH_NAMES[arr[0]-1]}–${MONTH_NAMES[arr[arr.length-1]-1]}`;
+}
+function getRegionalEstimate(tree){
+  const band = getClimateBand(tree.lat);
+  const entry = REGIONAL_HARVEST[band][tree.fruitType];
+  if(!entry) return { band, unavailable:true };
+  const isSouthern = tree.lat < 0;
+  const bloom = shiftMonths(entry.bloom, isSouthern);
+  const harvest = shiftMonths(entry.harvest, isSouthern);
+  return { band, bloomLabel: monthRangeLabel(bloom), harvestLabel: monthRangeLabel(harvest) };
+}
+
+let trees = [];
+let myName = '';
+let map, addMode = false;
+let markers = {};
+let predictionCache = {}; // treeId -> result
+let currentDrawerTreeId = null;
+
+// ---------- Storage ----------
+async function loadMyName(){
+  try{ myName = localStorage.getItem('windfall-my-name') || ''; }catch(e){ myName = ''; }
+  document.getElementById('my-name-input').value = myName;
+}
+async function saveMyName(v){
+  myName = v;
+  try{ localStorage.setItem('windfall-my-name', v); }catch(e){}
+}
+function treeToRow(tree){
+  return {
+    id: tree.id,
+    name: tree.name || '',
+    fruit_type: tree.fruitType || 'other',
+    variety: tree.variety || '',
+    notes: tree.notes || '',
+    lat: tree.lat,
+    lng: tree.lng,
+    added_by: tree.addedBy || '',
+    created_at: tree.createdAt || new Date().toISOString(),
+    history: tree.history || [],
+    ripeness_log: tree.ripenessLog || [],
+    tree_photo_url: tree.treePhotoUrl || null,
+    fruit_photo_url: tree.fruitPhotoUrl || null
+  };
+}
+function rowToTree(row){
+  return {
+    id: row.id,
+    name: row.name || '',
+    fruitType: row.fruit_type || 'other',
+    variety: row.variety || '',
+    notes: row.notes || '',
+    lat: row.lat,
+    lng: row.lng,
+    addedBy: row.added_by || '',
+    createdAt: row.created_at,
+    history: Array.isArray(row.history) ? row.history : [],
+    ripenessLog: Array.isArray(row.ripeness_log) ? row.ripeness_log : [],
+    treePhotoUrl: row.tree_photo_url || null,
+    fruitPhotoUrl: row.fruit_photo_url || null
+  };
+}
+async function loadTrees(){
+  try{
+    const { data, error } = await sb.from('trees').select('*').order('created_at', { ascending:true });
+    if(error) throw error;
+    trees = (data || []).map(rowToTree);
+    setStorageWarning(false);
+  }catch(e){
+    console.error('loadTrees error:', e);
+    trees = [];
+    setStorageWarning(true, "Couldn't load trees from the database — check your connection and reload.");
+  }
+}
+async function upsertTreeRemote(tree){
+  try{
+    const { error } = await sb.from('trees').upsert(treeToRow(tree));
+    if(error) throw error;
+    setStorageWarning(false);
+    return true;
+  }catch(e){
+    console.error('upsertTreeRemote error:', e);
+    showToast("Couldn't save — check your connection and try again");
+    setStorageWarning(true, "Saving isn't working right now — check your connection.");
+    return false;
+  }
+}
+async function deleteTreeRemote(id){
+  try{
+    const { error } = await sb.from('trees').delete().eq('id', id);
+    if(error) throw error;
+    return true;
+  }catch(e){
+    console.error('deleteTreeRemote error:', e);
+    showToast("Couldn't delete — try again");
+    return false;
+  }
+}
+
+// ---------- Photos ----------
+function readFileAsDataURL(file){
+  return new Promise((resolve, reject)=>{
+    const r = new FileReader();
+    r.onload = ()=>resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+function loadImageEl(dataUrl){
+  return new Promise((resolve, reject)=>{
+    const img = new Image();
+    img.onload = ()=>resolve(img);
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+async function compressImageFile(file, maxDim, quality){
+  // Tuned for phone-first viewing but still sharp on a desktop screen:
+  // 1280px longest side is plenty of detail at typical viewing sizes,
+  // and we aim for roughly 900KB or less per photo to keep shared storage light.
+  maxDim = maxDim || 1280; quality = quality || 0.78;
+  const targetBytes = 900 * 1024;
+  const hardCapBytes = 4.3 * 1024 * 1024;
+  const dataUrl = await readFileAsDataURL(file);
+  const img = await loadImageEl(dataUrl);
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  let attempts = 0, out;
+  while(true){
+    const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+    const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+    canvas.width = w; canvas.height = h;
+    ctx.drawImage(img, 0, 0, w, h);
+    out = canvas.toDataURL('image/jpeg', quality);
+    const approxBytes = out.length * 0.75;
+    if(approxBytes < targetBytes || attempts >= 5) break;
+    if(approxBytes > hardCapBytes){
+      maxDim = Math.round(maxDim * 0.7);
+      quality = Math.max(0.4, quality - 0.12);
+    }else{
+      maxDim = Math.round(maxDim * 0.85);
+      quality = Math.max(0.5, quality - 0.08);
+    }
+    attempts++;
+  }
+  return out;
+}
+async function savePhoto(treeId, kind, dataUrl){
+  try{
+    const blob = await (await fetch(dataUrl)).blob();
+    const path = `${treeId}-${kind}.jpg`;
+    const { error: upErr } = await sb.storage.from(PHOTO_BUCKET).upload(path, blob, { upsert:true, contentType:'image/jpeg' });
+    if(upErr) throw upErr;
+    const { data } = sb.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+    const url = data.publicUrl + '?t=' + Date.now(); // cache-bust so updated photos show immediately
+    const tree = trees.find(t=>t.id===treeId);
+    if(tree){
+      if(kind === 'tree') tree.treePhotoUrl = url; else tree.fruitPhotoUrl = url;
+      await upsertTreeRemote(tree);
+    }
+    return true;
+  }catch(e){ console.error('savePhoto error:', e); return false; }
+}
+async function loadPhoto(treeId, kind){
+  const tree = trees.find(t=>t.id===treeId);
+  if(!tree) return null;
+  return (kind === 'tree' ? tree.treePhotoUrl : tree.fruitPhotoUrl) || null;
+}
+async function deletePhoto(treeId, kind){
+  try{
+    const path = `${treeId}-${kind}.jpg`;
+    await sb.storage.from(PHOTO_BUCKET).remove([path]);
+    const tree = trees.find(t=>t.id===treeId);
+    if(tree){
+      if(kind === 'tree') tree.treePhotoUrl = null; else tree.fruitPhotoUrl = null;
+      await upsertTreeRemote(tree);
+    }
+  }catch(e){ console.error('deletePhoto error:', e); }
+}
+async function deletePhotoFile(treeId, kind){
+  try{ await sb.storage.from(PHOTO_BUCKET).remove([`${treeId}-${kind}.jpg`]); }catch(e){}
+}
+
+// ---------- Export (for migrating off Claude storage) ----------
+async function exportAllData(){
+  showToast('Gathering your data…');
+  try{
+    const withPhotos = await Promise.all(trees.map(async t=>{
+      const treePhoto = await loadPhoto(t.id, 'tree');
+      const fruitPhoto = await loadPhoto(t.id, 'fruit');
+      return { ...t, treePhoto: treePhoto || null, fruitPhoto: fruitPhoto || null };
+    }));
+    const payload = { exportedAt: new Date().toISOString(), trees: withPhotos };
+    const json = JSON.stringify(payload, null, 2);
+
+    document.getElementById('export-textarea').value = json;
+    document.getElementById('export-modal-overlay').style.display = 'flex';
+
+    try{
+      const blob = new Blob([json], { type:'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'windfall-export.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    }catch(e){ /* download blocked in this environment — the modal textarea still has it */ }
+
+    showToast('Export ready');
+  }catch(e){
+    showToast("Couldn't gather all your data — try again");
+  }
+}
+
+// ---------- Import (bringing in a backup from the Claude-hosted version) ----------
+async function importAllData(file){
+  showToast('Reading backup file…');
+  let payload;
+  try{
+    const text = await file.text();
+    payload = JSON.parse(text);
+  }catch(e){ showToast("That doesn't look like a valid export file"); return; }
+
+  const list = Array.isArray(payload) ? payload : (payload.trees || []);
+  if(!list.length){ showToast('No trees found in that file'); return; }
+
+  showToast(`Importing ${list.length} tree${list.length===1?'':'s'}…`);
+  let imported = 0;
+  for(const t of list){
+    const tree = {
+      id: t.id || ('t_' + Date.now() + '_' + Math.random().toString(36).slice(2,7)),
+      name: t.name || '', fruitType: t.fruitType || 'other', variety: t.variety || '',
+      notes: t.notes || '', lat: t.lat, lng: t.lng, addedBy: t.addedBy || '',
+      createdAt: t.createdAt || new Date().toISOString(),
+      history: Array.isArray(t.history) ? t.history : [],
+      ripenessLog: Array.isArray(t.ripenessLog) ? t.ripenessLog : []
+    };
+    const ok = await upsertTreeRemote(tree);
+    if(ok) imported++;
+    // Old exports carry photos as base64 data URLs — upload those into Supabase Storage now.
+    if(t.treePhoto && t.treePhoto.startsWith('data:')) await savePhoto(tree.id, 'tree', t.treePhoto);
+    else if(t.treePhoto){ tree.treePhotoUrl = t.treePhoto; await upsertTreeRemote(tree); }
+    if(t.fruitPhoto && t.fruitPhoto.startsWith('data:')) await savePhoto(tree.id, 'fruit', t.fruitPhoto);
+    else if(t.fruitPhoto){ tree.fruitPhotoUrl = t.fruitPhoto; await upsertTreeRemote(tree); }
+  }
+  await loadTrees();
+  renderMarkers();
+  renderSidebar();
+  showToast(`Imported ${imported} of ${list.length} trees`);
+}
+
+// ---------- Toast ----------
+let toastTimer;
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove('visible'), 2600);
+}
+
+// ---------- Map ----------
+const ZOOM_DOT_THRESHOLD = 15;   // below this: clustered into count bubbles
+const ZOOM_FULL_THRESHOLD = 17;  // at/above this: full fruit-shaped icons; between the two: plain color dots
+let clusterGroup;
+let currentIconTier = 'dot';
+function getIconTier(zoom){ return zoom >= ZOOM_FULL_THRESHOLD ? 'full' : 'dot'; }
+function updateMarkerIconsForZoom(){
+  const tier = getIconTier(map.getZoom());
+  if(tier === currentIconTier) return;
+  currentIconTier = tier;
+  Object.keys(markers).forEach(id=>{
+    const t = trees.find(tt=>tt.id===id);
+    if(t) markers[id].setIcon(createTreeIcon(t, tier));
+  });
+}
+function initMap(){
+  map = L.map('map', { zoomControl:true }).setView([40.0, -95.0], 4);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+  try{
+    if(typeof L.markerClusterGroup !== 'function') throw new Error('leaflet.markercluster did not load');
+    clusterGroup = L.markerClusterGroup({
+      maxClusterRadius: 50,
+      spiderfyOnMaxZoom: true,
+      disableClusteringAtZoom: ZOOM_DOT_THRESHOLD,
+      iconCreateFunction: function(cluster){
+        const count = cluster.getChildCount();
+        const size = count < 10 ? 34 : count < 50 ? 42 : 50;
+        return L.divIcon({
+          html: `<div class="cluster-body" style="width:${size}px; height:${size}px; font-size:${count<50?13:14}px;">${count}</div>`,
+          className: 'tree-cluster',
+          iconSize: [size, size]
+        });
+      }
+    });
+  }catch(e){
+    console.error('Marker clustering unavailable, showing pins without clustering:', e);
+    clusterGroup = L.layerGroup();
+  }
+  map.addLayer(clusterGroup);
+  map.on('click', onMapClick);
+  map.on('zoomend', updateMarkerIconsForZoom);
+}
+
+function locateMe(){
+  if(!navigator.geolocation){ showToast('This browser has no location support'); return; }
+  showToast('Finding your location…');
+  const onError = (err)=>{
+    if(err.code === 1){ showToast('Location permission denied — enable it in your browser/app settings, or use the search box instead'); }
+    else if(err.code === 2){ showToast("Position unavailable — try the search box below instead"); }
+    else if(err.code === 3){
+      // Retry once with lower accuracy / longer timeout before giving up
+      navigator.geolocation.getCurrentPosition(onSuccess, ()=>{
+        showToast('Location timed out — try the search box below instead');
+      }, { enableHighAccuracy:false, timeout:15000, maximumAge:60000 });
+      return;
+    } else { showToast('Could not get your location — try the search box below instead'); }
+  };
+  const onSuccess = (pos)=>{
+    const { latitude, longitude } = pos.coords;
+    map.setView([latitude, longitude], 17);
+    L.circleMarker([latitude, longitude], { radius:7, color:'#fff', weight:2, fillColor:'#2E6BE0', fillOpacity:1 }).addTo(map).bindTooltip('You are here');
+  };
+  navigator.geolocation.getCurrentPosition(onSuccess, onError, { enableHighAccuracy:true, timeout:8000, maximumAge:0 });
+}
+
+async function searchLocation(query){
+  if(!query || !query.trim()) return;
+  const q = query.trim();
+  showToast('Searching…');
+  try{
+    // Primary: Open-Meteo's geocoding API — same reliable host family as the weather features,
+    // good for cities/neighborhoods/zip codes (not exact street addresses).
+    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=1&language=en&format=json`;
+    const geoRes = await fetch(geoUrl);
+    if(geoRes.ok){
+      const geoData = await geoRes.json();
+      if(geoData.results && geoData.results.length){
+        const r = geoData.results[0];
+        map.setView([r.latitude, r.longitude], 14);
+        L.circleMarker([r.latitude, r.longitude], { radius:7, color:'#fff', weight:2, fillColor:'#2E6BE0', fillOpacity:1 }).addTo(map).bindTooltip('Search result');
+        showToast(`Found: ${[r.name, r.admin1, r.country].filter(Boolean).join(', ')}`);
+        return;
+      }
+    }
+    // Fallback: Nominatim, for street-level addresses Open-Meteo doesn't cover
+    const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`;
+    const nomRes = await fetch(nomUrl, { headers: { 'Accept':'application/json' } });
+    if(nomRes.ok){
+      const results = await nomRes.json();
+      if(results.length){
+        const { lat, lon, display_name } = results[0];
+        map.setView([parseFloat(lat), parseFloat(lon)], 16);
+        L.circleMarker([parseFloat(lat), parseFloat(lon)], { radius:7, color:'#fff', weight:2, fillColor:'#2E6BE0', fillOpacity:1 }).addTo(map).bindTooltip('Search result');
+        showToast(`Found: ${display_name.split(',').slice(0,2).join(',')}`);
+        return;
+      }
+    }
+    showToast(`No matches for "${q}" — try a city, zip code, or neighborhood name`);
+  }catch(e){
+    showToast("Search is unreachable right now — try 'Use my location', or pan/zoom the map by hand");
+  }
+}
+
+async function reverseGeocode(lat, lng){
+  try{
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
+    const res = await fetch(url, { headers: { 'Accept':'application/json' } });
+    if(!res.ok) return null;
+    const data = await res.json();
+    if(!data || !data.address) return null;
+    const a = data.address;
+    if(a.house_number && a.road) return `${a.house_number} ${a.road}`;
+    if(a.road) return a.road;
+    if(a.neighbourhood) return a.neighbourhood;
+    if(a.suburb) return a.suburb;
+    if(data.display_name) return data.display_name.split(',')[0];
+    return null;
+  }catch(e){ return null; }
+}
+
+function onMapClick(e){
+  if(!addMode) return;
+  setAddMode(false);
+  openTreeForm(null, e.latlng);
+}
+
+function setAddMode(on){
+  addMode = on;
+  document.getElementById('map').classList.toggle('add-mode', on);
+  document.getElementById('add-btn').classList.toggle('active', on);
+  document.getElementById('add-hint').classList.toggle('visible', on);
+}
+
+let filters = { fruitTypes: new Set(), when: 'all', search: '' };
+
+function getFilteredTrees(){
+  return trees.filter(t=>{
+    if(filters.fruitTypes.size && !filters.fruitTypes.has(t.fruitType)) return false;
+    if(filters.when !== 'all'){
+      const status = getCurrentStatus(t);
+      if(filters.when === 'flowering' && status !== 'flowering') return false;
+      if(filters.when === 'ready' && status !== 'ready') return false;
+      if(filters.when === 'soon' && status !== 'soon' && status !== 'ready') return false;
+    }
+    if(filters.search){
+      const hay = `${t.name||''} ${t.variety||''} ${t.notes||''}`.toLowerCase();
+      if(!hay.includes(filters.search.toLowerCase())) return false;
+    }
+    return true;
+  });
+}
+
+// Best-available signal for "is it ready right now": a recent walk-by log first,
+// then a computed GDD prediction if one's been run, then the rough regional estimate.
+function getCurrentStatus(tree){
+  const log = (tree.ripenessLog || []).slice().sort((a,b)=>b.date.localeCompare(a.date))[0];
+  if(log){
+    const daysSince = (Date.now() - new Date(log.date + 'T00:00:00').getTime()) / 86400000;
+    if(daysSince <= 21){
+      if(log.status === 'flowering') return 'flowering';
+      return log.status === 'ready' ? 'ready' : log.status === 'over' ? 'over' : 'under';
+    }
+  }
+  const cached = predictionCache[tree.id];
+  if(cached && (cached.status === 'predicted' || cached.status === 'projected')){
+    if(cached.progress >= 1) return 'ready';
+    if(cached.progress >= 0.75) return 'soon';
+    return 'under';
+  }
+  const est = getRegionalEstimate(tree);
+  if(!est.unavailable){
+    const band = REGIONAL_HARVEST[est.band][tree.fruitType];
+    if(band){
+      const isSouthern = tree.lat < 0;
+      const harvestMonths = shiftMonths(band.harvest, isSouthern);
+      const curMonth = new Date().getMonth() + 1;
+      if(harvestMonths.includes(curMonth)) return 'ready';
+      const prevMonth = ((harvestMonths[0] - 2 + 12) % 12) + 1;
+      if(curMonth === prevMonth) return 'soon';
+    }
+  }
+  return null;
+}
+
+const iconCache = {};
+function createTreeIcon(tree, tier){
+  tier = tier || currentIconTier;
+  const info = FRUIT_INFO[tree.fruitType] || FRUIT_INFO.other;
+  const status = getCurrentStatus(tree);
+  const cacheKey = `${tier}|${tree.fruitType}|${status}`;
+  if(iconCache[cacheKey]) return iconCache[cacheKey];
+  const ringColor = status === 'ready' ? 'var(--leaf)' : status === 'over' ? 'var(--danger)' : status === 'soon' ? 'var(--gold)' : status === 'flowering' ? 'var(--bloom)' : status === 'under' ? 'var(--ink-soft)' : 'rgba(255,255,255,0.9)';
+  let icon;
+  if(tier === 'dot'){
+    icon = L.divIcon({
+      className: 'tree-pin-dot',
+      html: `<div class="dot-body" style="background:${info.color}; border-color:${ringColor};"></div>`,
+      iconSize: [14,14],
+      iconAnchor: [7,7]
+    });
+  }else{
+    icon = L.divIcon({
+      className: 'tree-pin',
+      html: `<div class="pin-body" style="background:${lighten(info.color, 0.8)}; border-color:${ringColor};"><span class="pin-emoji">${info.emoji}</span></div>`,
+      iconSize: [30,30],
+      iconAnchor: [15,26]
+    });
+  }
+  iconCache[cacheKey] = icon;
+  return icon;
+}
+
+function renderFilterChips(){
+  const row = document.getElementById('filter-fruit-row');
+  row.innerHTML = '';
+  Object.entries(FRUIT_INFO).forEach(([key,info])=>{
+    const chip = document.createElement('div');
+    chip.className = 'filter-chip' + (filters.fruitTypes.has(key) ? ' selected' : '');
+    chip.innerHTML = `<span>${info.emoji}</span>${info.label}`;
+    chip.addEventListener('click', ()=>{
+      if(filters.fruitTypes.has(key)) filters.fruitTypes.delete(key); else filters.fruitTypes.add(key);
+      chip.classList.toggle('selected');
+      renderMarkers(); renderSidebar();
+    });
+    row.appendChild(chip);
+  });
+}
+
+function renderMarkers(){
+  clusterGroup.clearLayers();
+  markers = {};
+  getFilteredTrees().forEach(t=>{
+    const marker = L.marker([t.lat, t.lng], { icon: createTreeIcon(t) });
+    marker.bindTooltip(t.name || FRUIT_INFO[t.fruitType]?.label || 'Tree');
+    marker.on('click', ()=>openTreeDetail(t.id));
+    markers[t.id] = marker;
+    clusterGroup.addLayer(marker);
+  });
+}
+
+// ---------- Sidebar ----------
+function updateTreesToggleLabel(){
+  const btn = document.getElementById('toggle-trees-btn');
+  const sidebar = document.getElementById('sidebar');
+  if(!btn || !sidebar) return;
+  const isHidden = sidebar.classList.contains('hidden');
+  btn.textContent = isHidden ? `🌳 Trees (${trees.length})` : '✕ Hide trees';
+}
+
+function renderSidebar(){
+  const list = document.getElementById('tree-list');
+  document.getElementById('tree-count').textContent = trees.length === 1 ? '1 tree logged' : `${trees.length} trees logged`;
+  updateTreesToggleLabel();
+  if(trees.length === 0){
+    list.innerHTML = `<div class="empty-state">No trees yet. Tap "＋ Add a tree", then click the map where it stands.</div>`;
+    return;
+  }
+  const filtered = getFilteredTrees();
+  if(filtered.length === 0){
+    list.innerHTML = `<div class="empty-state">No trees match these filters. <button class="filter-clear" style="display:inline;" onclick="document.getElementById('filter-clear').click()">Clear filters</button></div>`;
+    return;
+  }
+  list.innerHTML = '';
+  filtered.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).forEach(t=>{
+    const info = FRUIT_INFO[t.fruitType] || FRUIT_INFO.other;
+    const row = document.createElement('div');
+    row.className = 'tree-row';
+    const cached = predictionCache[t.id];
+    const varietyLabel = t.variety ? ` · ${escapeHtml(t.variety)}` : '';
+    row.innerHTML = `
+      <span class="fruit-dot" style="background:${info.color}"></span>
+      <div class="meta">
+        <div class="name">${escapeHtml(t.name || info.label)}</div>
+        <div class="sub">${info.label}${varietyLabel}${cached ? ' · ' + predictionSummaryShort(cached) : ' · tap to check ripeness'}</div>
+      </div>
+      ${renderDialSmall(cached)}
+    `;
+    row.addEventListener('click', ()=>openTreeDetail(t.id));
+    list.appendChild(row);
+  });
+}
+
+function renderDialSmall(cached){
+  const pct = cached && cached.status !== 'no-data' && cached.status !== 'weather-unavailable' ? Math.round((cached.progress||0)*100) : null;
+  const color = pct === null ? 'var(--line)' : (pct >= 100 ? 'var(--leaf)' : 'var(--gold)');
+  const circumference = 2 * Math.PI * 15;
+  const offset = pct === null ? circumference : circumference * (1 - Math.min(pct,100)/100);
+  return `<div class="dial">
+    <svg width="38" height="38" viewBox="0 0 38 38">
+      <circle class="bg" cx="19" cy="19" r="15"></circle>
+      <circle class="fg" cx="19" cy="19" r="15" stroke="${color}" stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"></circle>
+    </svg>
+    <div class="label">${pct === null ? '—' : (pct>=100 ? '✓' : pct+'%')}</div>
+  </div>`;
+}
+
+function predictionSummaryShort(cached){
+  if(cached.status === 'predicted' || cached.status === 'projected'){
+    return (cached.progress>=1 ? 'ready now' : 'est. ' + formatDateShort(cached.date));
+  }
+  if(cached.status === 'no-data') return 'needs history';
+  if(cached.status === 'weather-unavailable') return 'weather unavailable';
+  return '';
+}
+
+function formatDateShort(iso){
+  if(!iso) return '—';
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString(undefined, { month:'short', day:'numeric' });
+}
+
+function escapeHtml(s){
+  return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ---------- Weather / GDD prediction ----------
+async function fetchArchive(lat,lng,start,end){
+  try{
+    const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lng}&start_date=${start}&end_date=${end}&daily=temperature_2m_max,temperature_2m_min&timezone=auto`;
+    const res = await fetch(url);
+    if(!res.ok) return null;
+    const data = await res.json();
+    if(!data.daily) return null;
+    return data.daily.time.map((date,i)=>({date, tmax:data.daily.temperature_2m_max[i], tmin:data.daily.temperature_2m_min[i]}))
+      .filter(d=>d.tmax!=null && d.tmin!=null);
+  }catch(e){ return null; }
+}
+async function fetchRecentAndForecast(lat,lng){
+  try{
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=temperature_2m_max,temperature_2m_min&past_days=16&forecast_days=16&timezone=auto`;
+    const res = await fetch(url);
+    if(!res.ok) return null;
+    const data = await res.json();
+    if(!data.daily) return null;
+    return data.daily.time.map((date,i)=>({date, tmax:data.daily.temperature_2m_max[i], tmin:data.daily.temperature_2m_min[i]}))
+      .filter(d=>d.tmax!=null && d.tmin!=null);
+  }catch(e){ return null; }
+}
+function dailyGDD(day, base){ return Math.max(0, (day.tmax + day.tmin)/2 - base); }
+function sumGDD(days, base){ return days.reduce((s,d)=>s + dailyGDD(d, base), 0); }
+
+async function getThisYearTemps(lat,lng,startDate){
+  const today = new Date();
+  const cutoff = new Date(today); cutoff.setDate(cutoff.getDate() - 17);
+  const cutoffStr = cutoff.toISOString().slice(0,10);
+  let historicalPart = [];
+  if(new Date(startDate) < cutoff){
+    historicalPart = await fetchArchive(lat,lng,startDate,cutoffStr) || [];
+  }
+  const recentForecast = await fetchRecentAndForecast(lat,lng) || [];
+  const map = new Map();
+  [...historicalPart, ...recentForecast].forEach(d=>{ if(d.date >= startDate) map.set(d.date, d); });
+  return Array.from(map.values()).sort((a,b)=>a.date.localeCompare(b.date));
+}
+
+async function computePrediction(tree){
+  const validYears = (tree.history || []).filter(h=>h.bloomDate && h.harvestStart);
+  if(validYears.length === 0) return { status:'no-data' };
+
+  const base = (FRUIT_INFO[tree.fruitType] || FRUIT_INFO.other).baseTempC;
+  const targets = [];
+  for(const h of validYears){
+    const temps = await fetchArchive(tree.lat, tree.lng, h.bloomDate, h.harvestStart);
+    if(temps && temps.length) targets.push(sumGDD(temps, base));
+  }
+  if(targets.length === 0) return { status:'weather-unavailable' };
+  const targetGDD = targets.reduce((a,b)=>a+b,0) / targets.length;
+
+  const year = new Date().getFullYear();
+  const thisYearEntry = (tree.history || []).find(h=>h.year === year);
+  const startDate = (thisYearEntry && thisYearEntry.bloomDate) ? thisYearEntry.bloomDate : `${year}-01-01`;
+  const allTemps = await getThisYearTemps(tree.lat, tree.lng, startDate);
+  if(!allTemps.length) return { status:'weather-unavailable' };
+
+  let cumulative = 0, reachedDate = null;
+  for(const day of allTemps){
+    cumulative += dailyGDD(day, base);
+    if(!reachedDate && cumulative >= targetGDD) reachedDate = day.date;
+  }
+  if(reachedDate){
+    return { status:'predicted', date:reachedDate, progress:1, targetGDD, cumulative, yearsUsed:targets.length };
+  }
+  const recent = allTemps.slice(-14);
+  const avgRate = recent.length ? recent.reduce((a,d)=>a+dailyGDD(d,base),0) / recent.length : 0;
+  const remaining = targetGDD - cumulative;
+  let projectedDate = null;
+  if(avgRate > 0){
+    const daysNeeded = Math.ceil(remaining / avgRate);
+    const lastDate = new Date(allTemps[allTemps.length-1].date + 'T00:00:00');
+    lastDate.setDate(lastDate.getDate() + daysNeeded);
+    projectedDate = lastDate.toISOString().slice(0,10);
+  }
+  return { status:'projected', date:projectedDate, progress:Math.min(cumulative/targetGDD, 0.99), targetGDD, cumulative, yearsUsed:targets.length };
+}
+
+// ---------- Drawer: add/edit tree ----------
+function openTreeForm(existingTree, latlng){
+  const isNew = !existingTree;
+  const tree = existingTree || {
+    id: 't_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+    name: '', fruitType: 'apple', variety: '', notes: '',
+    lat: latlng.lat, lng: latlng.lng,
+    addedBy: myName, createdAt: new Date().toISOString(), history: [], ripenessLog: []
+  };
+
+  const drawer = document.getElementById('drawer');
+  drawer.innerHTML = `
+    <button class="close-btn" id="close-drawer">✕</button>
+    <h2>${isNew ? 'Add a tree' : 'Edit tree'}</h2>
+    <div class="field">
+      <label>Name / location note</label>
+      <input type="text" id="f-name" placeholder="${isNew ? 'Looking up nearest address…' : 'e.g. Big apple by the mailbox'}" value="${escapeHtml(tree.name)}">
+      ${isNew ? `<button type="button" class="photo-remove-link" id="retry-address-btn" style="margin-top:5px;">Retry address lookup</button>` : ''}
+    </div>
+    <div class="field">
+      <label>Fruit type</label>
+      <div class="fruit-combobox">
+        <input type="text" id="f-fruit-search" placeholder="Type to search, or click to browse…" autocomplete="off">
+        <div class="fruit-dropdown" id="fruit-dropdown-list"></div>
+      </div>
+    </div>
+    <div class="field">
+      <label>Variety <span style="text-transform:none; font-weight:400;">(optional)</span></label>
+      <input type="text" id="f-variety" list="variety-datalist" placeholder="Start typing for common varieties…" value="${escapeHtml(tree.variety||'')}">
+      <datalist id="variety-datalist"></datalist>
+    </div>
+    <div class="field">
+      <label>Notes</label>
+      <textarea id="f-notes" placeholder="Access notes, ownership, anything useful">${escapeHtml(tree.notes||'')}</textarea>
+    </div>
+    ${isNew ? `
+    <div class="field">
+      <label>Current status <span style="text-transform:none; font-weight:400;">(optional)</span></label>
+      <div class="ripeness-btns" id="initial-status-btns">
+        <button type="button" class="ripeness-btn flowering" data-status="flowering"><span class="rdot"></span>Flowering</button>
+        <button type="button" class="ripeness-btn under" data-status="under"><span class="rdot"></span>Not yet</button>
+        <button type="button" class="ripeness-btn ready" data-status="ready"><span class="rdot"></span>Ready now</button>
+        <button type="button" class="ripeness-btn over" data-status="over"><span class="rdot"></span>Past peak</button>
+      </div>
+    </div>
+    ` : ''}
+    <div class="field">
+      <label>Photo of the tree</label>
+      <div class="photo-field">
+        <img class="photo-thumb empty" id="tree-photo-preview">
+        <div class="photo-controls">
+          <input type="file" accept="image/*" capture="environment" id="f-tree-photo-input">
+          <button class="photo-remove-link" id="tree-photo-remove" style="display:none;">Remove photo</button>
+        </div>
+      </div>
+    </div>
+    <div class="field">
+      <label>Close-up photo of the fruit</label>
+      <div class="photo-field">
+        <img class="photo-thumb empty" id="fruit-photo-preview">
+        <div class="photo-controls">
+          <input type="file" accept="image/*" capture="environment" id="f-fruit-photo-input">
+          <button class="photo-remove-link" id="fruit-photo-remove" style="display:none;">Remove photo</button>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:18px;">
+      <button class="action primary" id="save-tree-btn">${isNew ? 'Add tree' : 'Save changes'}</button>
+      ${!isNew ? '<button class="action danger" id="delete-tree-btn">Delete</button>' : ''}
+    </div>
+  `;
+
+  // ---- optional current status (new trees only) ----
+  let initialStatus = null;
+  const initialStatusBtns = document.getElementById('initial-status-btns');
+  if(initialStatusBtns){
+    initialStatusBtns.querySelectorAll('.ripeness-btn').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const alreadySelected = btn.dataset.selected === 'true';
+        initialStatusBtns.querySelectorAll('.ripeness-btn').forEach(b=>{
+          b.dataset.selected = 'false';
+          b.style.background = '#fff';
+          b.style.borderColor = 'var(--line)';
+        });
+        if(!alreadySelected){
+          btn.dataset.selected = 'true';
+          btn.style.background = 'var(--paper)';
+          btn.style.borderColor = 'var(--ink)';
+          initialStatus = btn.dataset.status;
+        }else{
+          initialStatus = null;
+        }
+      });
+    });
+  }
+
+  // ---- auto-name from nearest address (new trees only) ----
+  if(isNew){
+    const nameInput = document.getElementById('f-name');
+    const runLookup = ()=>{
+      nameInput.placeholder = 'Looking up nearest address…';
+      reverseGeocode(tree.lat, tree.lng).then(addr=>{
+        if(nameInput.dataset.userEdited === 'true') return; // person already typed their own name
+        if(addr){
+          nameInput.value = addr;
+        }else{
+          nameInput.placeholder = "Couldn't find a nearby address — name it yourself";
+        }
+      });
+    };
+    nameInput.addEventListener('input', ()=>{ nameInput.dataset.userEdited = 'true'; });
+    const retryBtn = document.getElementById('retry-address-btn');
+    if(retryBtn) retryBtn.addEventListener('click', ()=>{ nameInput.dataset.userEdited = 'false'; nameInput.value = ''; runLookup(); });
+    runLookup();
+  }
+
+  // ---- photo state for this form session ----
+  const photoState = {
+    tree: { pendingDataUrl: null, remove: false },
+    fruit: { pendingDataUrl: null, remove: false }
+  };
+  function setPreview(kind, src){
+    const img = document.getElementById(`${kind}-photo-preview`);
+    const removeBtn = document.getElementById(`${kind}-photo-remove`);
+    if(src){
+      img.src = src; img.classList.remove('empty'); img.alt = `${kind} photo`;
+      removeBtn.style.display = 'block';
+    }else{
+      img.removeAttribute('src'); img.classList.add('empty'); img.alt = 'No photo';
+      removeBtn.style.display = 'none';
+    }
+  }
+  setPreview('tree', null); setPreview('fruit', null);
+  if(!isNew){
+    // load existing photos in the background
+    loadPhoto(tree.id, 'tree').then(src=>{ if(src && !photoState.tree.remove) setPreview('tree', src); });
+    loadPhoto(tree.id, 'fruit').then(src=>{ if(src && !photoState.fruit.remove) setPreview('fruit', src); });
+  }
+  ['tree','fruit'].forEach(kind=>{
+    document.getElementById(`f-${kind}-photo-input`).addEventListener('change', async (e)=>{
+      const file = e.target.files[0];
+      if(!file) return;
+      showToast('Processing photo…');
+      try{
+        const compressed = await compressImageFile(file);
+        photoState[kind].pendingDataUrl = compressed;
+        photoState[kind].remove = false;
+        setPreview(kind, compressed);
+      }catch(err){ showToast("Couldn't read that photo — try another"); }
+    });
+    document.getElementById(`${kind}-photo-remove`).addEventListener('click', ()=>{
+      photoState[kind].pendingDataUrl = null;
+      photoState[kind].remove = true;
+      setPreview(kind, null);
+    });
+  });
+
+  const fruitSearchInput = document.getElementById('f-fruit-search');
+  const fruitDropdown = document.getElementById('fruit-dropdown-list');
+  const sortedFruitEntries = Object.entries(FRUIT_INFO).sort((a,b)=>a[1].label.localeCompare(b[1].label));
+
+  function setFruitInputDisplay(key){
+    const info = FRUIT_INFO[key] || FRUIT_INFO.other;
+    fruitSearchInput.value = info.label;
+  }
+  function updateVarietyDatalist(key){
+    const list = document.getElementById('variety-datalist');
+    if(!list) return;
+    const suggestions = VARIETY_SUGGESTIONS[key] || [];
+    list.innerHTML = suggestions.map(v => `<option value="${escapeHtml(v)}"></option>`).join('');
+  }
+  updateVarietyDatalist(tree.fruitType);
+  function closeFruitDropdown(){ fruitDropdown.classList.remove('open'); }
+  function renderFruitOptions(query){
+    const q = (query || '').trim().toLowerCase();
+    const matches = sortedFruitEntries.filter(([key,info]) => info.label.toLowerCase().includes(q));
+    fruitDropdown.innerHTML = matches.length
+      ? matches.map(([key,info]) => `<div class="fruit-option" data-key="${key}"><span class="fruit-dot" style="background:${info.color}"></span>${info.label}</div>`).join('')
+      : `<div class="fruit-option-empty">No matching fruit — try a different search</div>`;
+    fruitDropdown.querySelectorAll('.fruit-option').forEach(opt=>{
+      opt.addEventListener('mousedown', (e)=>{
+        e.preventDefault();
+        tree.fruitType = opt.dataset.key;
+        setFruitInputDisplay(tree.fruitType);
+        updateVarietyDatalist(tree.fruitType);
+        closeFruitDropdown();
+      });
+    });
+    fruitDropdown.classList.add('open');
+  }
+  setFruitInputDisplay(tree.fruitType);
+  fruitSearchInput.addEventListener('focus', ()=>{
+    fruitSearchInput.select();
+    renderFruitOptions('');
+  });
+  fruitSearchInput.addEventListener('input', ()=>renderFruitOptions(fruitSearchInput.value));
+  fruitSearchInput.addEventListener('blur', ()=>{
+    setTimeout(()=>{ closeFruitDropdown(); setFruitInputDisplay(tree.fruitType); }, 120);
+  });
+  fruitSearchInput.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter'){
+      e.preventDefault();
+      const first = fruitDropdown.querySelector('.fruit-option');
+      if(first){ tree.fruitType = first.dataset.key; setFruitInputDisplay(tree.fruitType); updateVarietyDatalist(tree.fruitType); }
+      closeFruitDropdown();
+      fruitSearchInput.blur();
+    }else if(e.key === 'Escape'){
+      closeFruitDropdown();
+      setFruitInputDisplay(tree.fruitType);
+      fruitSearchInput.blur();
+    }
+  });
+
+  document.getElementById('close-drawer').addEventListener('click', closeDrawer);
+  document.getElementById('save-tree-btn').addEventListener('click', async (e)=>{
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.textContent = 'Saving…';
+    tree.name = document.getElementById('f-name').value.trim();
+    tree.notes = document.getElementById('f-notes').value.trim();
+    tree.variety = document.getElementById('f-variety').value.trim();
+    if(isNew){
+      tree.addedBy = myName;
+      if(initialStatus){
+        const entry = { id:'log_'+Date.now()+'_'+Math.random().toString(36).slice(2,6), date:new Date().toISOString().slice(0,10), status:initialStatus, note:'', loggedBy: myName };
+        tree.ripenessLog = [entry];
+        applyLogToHistory(tree, entry);
+      }
+      trees.push(tree);
+    }else{
+      const idx = trees.findIndex(t=>t.id===tree.id);
+      trees[idx] = tree;
+    }
+    await upsertTreeRemote(tree);
+    for(const kind of ['tree','fruit']){
+      if(photoState[kind].pendingDataUrl){
+        const ok = await savePhoto(tree.id, kind, photoState[kind].pendingDataUrl);
+        if(!ok) showToast(`Couldn't save the ${kind} photo — it may be too large`);
+      }else if(photoState[kind].remove){
+        await deletePhoto(tree.id, kind);
+      }
+    }
+    renderMarkers();
+    renderSidebar();
+    closeDrawer();
+    showToast(isNew ? 'Tree added' : 'Saved');
+  });
+  if(!isNew){
+    document.getElementById('delete-tree-btn').addEventListener('click', async ()=>{
+      if(!confirm('Delete this tree for everyone using this map?')) return;
+      await deleteTreeRemote(tree.id);
+      await deletePhotoFile(tree.id, 'tree');
+      await deletePhotoFile(tree.id, 'fruit');
+      trees = trees.filter(t=>t.id !== tree.id);
+      renderMarkers();
+      renderSidebar();
+      closeDrawer();
+      showToast('Tree deleted');
+    });
+  }
+  document.getElementById('overlay').classList.add('visible');
+}
+
+// ---------- Drawer: detail view (history + prediction) ----------
+function openTreeDetail(treeId){
+  currentDrawerTreeId = treeId;
+  const tree = trees.find(t=>t.id===treeId);
+  if(!tree) return;
+  const info = FRUIT_INFO[tree.fruitType] || FRUIT_INFO.other;
+
+  const drawer = document.getElementById('drawer');
+  drawer.innerHTML = `
+    <button class="close-btn" id="close-drawer">✕</button>
+    <h2>${escapeHtml(tree.name || info.label)}</h2>
+    <div style="font-size:12.5px; color:var(--ink-soft); margin-bottom:4px;">${info.label}${tree.addedBy ? ' · added by ' + escapeHtml(tree.addedBy) : ''}</div>
+    ${tree.notes ? `<div style="font-size:13px; margin:8px 0 4px;">${escapeHtml(tree.notes)}</div>` : ''}
+
+    <div class="photo-gallery" id="detail-photo-gallery"></div>
+
+    <div class="advice-card">
+      <span class="tag ${info.climacteric===true?'climacteric':info.climacteric===false?'non-climacteric':'unknown'}">${info.climacteric===true?'Ripens after picking':info.climacteric===false?'Must ripen on tree':'Unknown'}</span>
+      <div>${info.advice}</div>
+    </div>
+
+    <div class="drawer-section">
+      <h3>Ripeness check-ins</h3>
+      <button class="action primary" id="add-update-btn">＋ Add tree update</button>
+      <div id="update-form-container"></div>
+      <div class="log-timeline" id="log-timeline"></div>
+      <div class="predict-note" style="margin-top:8px;">Each check-in builds this tree's ripeness record over time, and the first "ready" and "past peak" entries each year automatically fill in its harvest history below — which sharpens next year's prediction.</div>
+    </div>
+
+    ${renderRegionalCard(tree, info)}
+
+    <div class="drawer-section">
+      <h3>Ripeness prediction</h3>
+      <div class="predict-box" id="predict-box">
+        <button class="action primary" id="predict-btn">Check ripeness now</button>
+        <div id="predict-result"></div>
+      </div>
+    </div>
+
+    <div class="drawer-section">
+      <h3>Bloom &amp; harvest history</h3>
+      <table class="history" id="history-table">
+        <thead><tr><th>Year</th><th>Bloom date</th><th>Harvest start</th><th>Harvest end</th><th></th></tr></thead>
+        <tbody id="history-body"></tbody>
+      </table>
+      <button class="action" id="add-year-btn" style="margin-top:8px;">＋ Add a year</button>
+      <div style="margin-top:10px;">
+        <button class="action primary" id="save-history-btn">Save history</button>
+      </div>
+    </div>
+
+    <div class="drawer-section">
+      <button class="action" id="edit-tree-btn">Edit tree details</button>
+    </div>
+  `;
+
+  document.getElementById('close-drawer').addEventListener('click', closeDrawer);
+  document.getElementById('edit-tree-btn').addEventListener('click', ()=>openTreeForm(tree, null));
+  document.getElementById('add-update-btn').addEventListener('click', ()=>renderUpdateForm(tree));
+  renderLogTimeline(tree);
+
+  const gallery = document.getElementById('detail-photo-gallery');
+  loadDetailPhotos(tree, gallery);
+
+  renderHistoryTable(tree);
+  document.getElementById('add-year-btn').addEventListener('click', ()=>{
+    tree.history = tree.history || [];
+    const year = new Date().getFullYear();
+    if(!tree.history.some(h=>h.year===year)){
+      tree.history.push({ year, bloomDate:'', harvestStart:'', harvestEnd:'' });
+    }else{
+      tree.history.push({ year: (tree.history[tree.history.length-1]?.year || year) - 1, bloomDate:'', harvestStart:'', harvestEnd:'' });
+    }
+    renderHistoryTable(tree);
+  });
+  document.getElementById('save-history-btn').addEventListener('click', async ()=>{
+    const idx = trees.findIndex(t=>t.id===tree.id);
+    trees[idx] = tree;
+    await upsertTreeRemote(tree);
+    delete predictionCache[tree.id];
+    showToast('History saved');
+  });
+
+  document.getElementById('predict-btn').addEventListener('click', ()=>runPrediction(tree));
+
+  const cached = predictionCache[tree.id];
+  if(cached) renderPredictionResult(cached);
+
+  document.getElementById('overlay').classList.add('visible');
+}
+
+function renderUpdateForm(tree){
+  const container = document.getElementById('update-form-container');
+  if(container.dataset.open === 'true'){ container.innerHTML = ''; container.dataset.open = 'false'; return; }
+  container.dataset.open = 'true';
+  const today = new Date().toISOString().slice(0,10);
+  container.innerHTML = `
+    <div class="field" style="margin-top:10px;">
+      <label>When</label>
+      <input type="date" id="upd-date" value="${today}" max="${today}">
+    </div>
+    <div class="field">
+      <label>Status</label>
+      <div class="ripeness-btns" id="upd-status-btns">
+        <button type="button" class="ripeness-btn flowering" data-status="flowering"><span class="rdot"></span>Flowering</button>
+        <button type="button" class="ripeness-btn under" data-status="under"><span class="rdot"></span>Not yet</button>
+        <button type="button" class="ripeness-btn ready" data-status="ready"><span class="rdot"></span>Ready now</button>
+        <button type="button" class="ripeness-btn over" data-status="over"><span class="rdot"></span>Past peak</button>
+      </div>
+    </div>
+    <textarea class="ripeness-note-input" id="upd-note" placeholder="Optional note — amount, taste, condition…"></textarea>
+    <div style="display:flex; gap:8px; margin-top:8px;">
+      <button class="action primary" id="upd-save-btn" disabled>Save update</button>
+      <button class="action" id="upd-cancel-btn">Cancel</button>
+    </div>
+  `;
+  let selectedStatus = null;
+  container.querySelectorAll('.ripeness-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      selectedStatus = btn.dataset.status;
+      container.querySelectorAll('.ripeness-btn').forEach(b=>{
+        const isSel = b === btn;
+        b.style.background = isSel ? 'var(--paper)' : '#fff';
+        b.style.borderColor = isSel ? 'var(--ink)' : 'var(--line)';
+      });
+      document.getElementById('upd-save-btn').disabled = false;
+    });
+  });
+  document.getElementById('upd-cancel-btn').addEventListener('click', ()=>{ container.innerHTML = ''; container.dataset.open = 'false'; });
+  document.getElementById('upd-save-btn').addEventListener('click', async (e)=>{
+    if(!selectedStatus) return;
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.textContent = 'Saving…';
+    const date = document.getElementById('upd-date').value || today;
+    const note = document.getElementById('upd-note').value.trim();
+    const entry = { id:'log_'+Date.now()+'_'+Math.random().toString(36).slice(2,6), date, status:selectedStatus, note, loggedBy: myName };
+    tree.ripenessLog = tree.ripenessLog || [];
+    tree.ripenessLog.push(entry);
+    applyLogToHistory(tree, entry);
+    const idx = trees.findIndex(t=>t.id===tree.id);
+    trees[idx] = tree;
+    await upsertTreeRemote(tree);
+    delete predictionCache[tree.id];
+    container.innerHTML = ''; container.dataset.open = 'false';
+    renderLogTimeline(tree);
+    renderHistoryTable(tree);
+    renderMarkers(); renderSidebar();
+    showToast('Update saved');
+  });
+}
+
+// A "ready" check-in fills in this year's harvest-start date (if not already set),
+// and a "past peak" check-in fills in harvest-end — feeding the GDD prediction automatically.
+function applyLogToHistory(tree, entry){
+  const year = parseInt(entry.date.slice(0,4), 10);
+  tree.history = tree.history || [];
+  let yearEntry = tree.history.find(h=>h.year === year);
+  if(!yearEntry){ yearEntry = { year, bloomDate:'', harvestStart:'', harvestEnd:'' }; tree.history.push(yearEntry); }
+  if(entry.status === 'flowering' && !yearEntry.bloomDate) yearEntry.bloomDate = entry.date;
+  if(entry.status === 'ready' && !yearEntry.harvestStart) yearEntry.harvestStart = entry.date;
+  if(entry.status === 'over' && !yearEntry.harvestEnd) yearEntry.harvestEnd = entry.date;
+}
+
+function renderLogTimeline(tree){
+  const el = document.getElementById('log-timeline');
+  const logs = (tree.ripenessLog || []).slice().sort((a,b)=>b.date.localeCompare(a.date));
+  if(logs.length === 0){
+    el.innerHTML = `<div class="log-empty">No check-ins yet — add one next time you walk by, and a picture will build up year over year.</div>`;
+    return;
+  }
+  const byYear = {};
+  logs.forEach(l=>{ const y = l.date.slice(0,4); (byYear[y] = byYear[y] || []).push(l); });
+  const years = Object.keys(byYear).sort((a,b)=>b-a);
+  const statusLabel = { flowering:'Flowering', ready:'Ready to pick', over:'Past peak', under:'Not yet ripe' };
+  const statusColor = { flowering:'var(--bloom)', ready:'var(--leaf)', over:'var(--danger)', under:'var(--ink-soft)' };
+  el.innerHTML = years.map(y=>`
+    <div style="margin-top:10px;">
+      <div style="font-size:11px; font-weight:600; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.04em;">${y}</div>
+      ${byYear[y].map(l=>`
+        <div class="log-entry">
+          <span class="rdot" style="background:${statusColor[l.status]||'var(--ink-soft)'}"></span>
+          <span class="le-date">${formatDateShort(l.date)}</span>
+          <span style="flex:1;">${statusLabel[l.status]||l.status}${l.note ? ' — ' + escapeHtml(l.note) : ''}${l.loggedBy ? ` <span class="le-meta">(${escapeHtml(l.loggedBy)})</span>` : ''}</span>
+          <button class="remove-row" data-log-id="${l.id}" title="Delete this check-in">✕</button>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+  el.querySelectorAll('.remove-row').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      tree.ripenessLog = tree.ripenessLog.filter(l=>l.id !== btn.dataset.logId);
+      const idx = trees.findIndex(t=>t.id===tree.id);
+      trees[idx] = tree;
+      await upsertTreeRemote(tree);
+      delete predictionCache[tree.id];
+      renderLogTimeline(tree);
+      renderMarkers(); renderSidebar();
+    });
+  });
+}
+
+function loadDetailPhotos(tree, gallery){
+  gallery.innerHTML = `<div class="photo-loading">Loading photos…</div>`;
+  Promise.all([loadPhoto(tree.id,'tree'), loadPhoto(tree.id,'fruit')])
+    .then(([treePhoto, fruitPhoto])=>{
+      if(!treePhoto && !fruitPhoto){
+        gallery.innerHTML = `<div class="photo-loading">No photos yet — tap "Edit tree details" below to add one.</div>`;
+        return;
+      }
+      gallery.innerHTML = `
+        ${treePhoto ? `<figure><img src="${treePhoto}" alt="Tree photo"><figcaption>Tree</figcaption></figure>` : ''}
+        ${fruitPhoto ? `<figure><img src="${fruitPhoto}" alt="Fruit close-up"><figcaption>Fruit close-up</figcaption></figure>` : ''}
+      `;
+    })
+    .catch(()=>{
+      gallery.innerHTML = `<div class="photo-loading">Couldn't load photos just now. <button class="filter-clear" style="display:inline;" id="retry-photos-btn">Retry</button></div>`;
+      const retryBtn = document.getElementById('retry-photos-btn');
+      if(retryBtn) retryBtn.addEventListener('click', ()=>loadDetailPhotos(tree, gallery));
+    });
+}
+
+function renderHistoryTable(tree){
+  const body = document.getElementById('history-body');
+  const rows = (tree.history || []).slice().sort((a,b)=>b.year-a.year);
+  body.innerHTML = '';
+  if(rows.length === 0){
+    body.innerHTML = `<tr><td colspan="5" style="color:var(--ink-soft); font-family:'Inter',sans-serif;">No years logged yet — add one below.</td></tr>`;
+    return;
+  }
+  rows.forEach(h=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="history-year-label">${h.year}</td>
+      <td><input type="date" value="${h.bloomDate||''}" data-year="${h.year}" data-field="bloomDate"></td>
+      <td><input type="date" value="${h.harvestStart||''}" data-year="${h.year}" data-field="harvestStart"></td>
+      <td><input type="date" value="${h.harvestEnd||''}" data-year="${h.year}" data-field="harvestEnd"></td>
+      <td><button class="remove-row" data-year="${h.year}">✕</button></td>
+    `;
+    body.appendChild(tr);
+  });
+  body.querySelectorAll('input').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const entry = tree.history.find(h=>h.year == inp.dataset.year);
+      if(entry) entry[inp.dataset.field] = inp.value;
+    });
+  });
+  body.querySelectorAll('.remove-row').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      tree.history = tree.history.filter(h=>h.year != btn.dataset.year);
+      renderHistoryTable(tree);
+    });
+  });
+}
+
+async function runPrediction(tree){
+  const btn = document.getElementById('predict-btn');
+  btn.disabled = true;
+  btn.textContent = 'Checking weather…';
+  const result = await computePrediction(tree);
+  predictionCache[tree.id] = result;
+  btn.disabled = false;
+  btn.textContent = 'Recheck ripeness';
+  renderPredictionResult(result);
+  renderSidebar();
+}
+
+function renderPredictionResult(result){
+  const el = document.getElementById('predict-result');
+  if(!el) return;
+  if(result.status === 'no-data'){
+    el.innerHTML = `<div class="predict-note">Add at least one past year with both a bloom date and a harvest start date below, then check again — the prediction learns from your own tree's history.</div>`;
+    return;
+  }
+  if(result.status === 'weather-unavailable'){
+    el.innerHTML = `<div class="predict-note">Couldn't reach the weather service just now. Try again in a moment.</div>`;
+    return;
+  }
+  const pct = Math.round((result.progress||0) * 100);
+  const circumference = 2 * Math.PI * 26;
+  const offset = circumference * (1 - Math.min(pct,100)/100);
+  const color = pct >= 100 ? 'var(--leaf)' : 'var(--gold)';
+  const headline = result.progress >= 1
+    ? `Ready around ${formatDateLong(result.date)}`
+    : (result.date ? `Estimated ready ${formatDateLong(result.date)}` : `${pct}% of the way there — not enough data yet to date it precisely`);
+  el.innerHTML = `
+    <div class="predict-result">
+      <div class="dial" style="width:56px;height:56px;">
+        <svg width="56" height="56" viewBox="0 0 56 56">
+          <circle class="bg" cx="28" cy="28" r="26"></circle>
+          <circle class="fg" cx="28" cy="28" r="26" stroke="${color}" stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"></circle>
+        </svg>
+        <div class="label" style="font-size:13px;">${pct}%</div>
+      </div>
+      <div class="text">
+        <div class="headline">${headline}</div>
+        <div class="sub">Based on accumulated warmth (growing-degree-days) vs. this tree's ${result.yearsUsed} past year${result.yearsUsed===1?'':'s'} of history</div>
+      </div>
+    </div>
+    <div class="predict-note">This is a data-informed estimate, not a guarantee — local shade, soil, and this year's rainfall also affect timing. Keep logging harvest dates each year to sharpen it.</div>
+  `;
+}
+
+function renderRegionalCard(tree, info){
+  const est = getRegionalEstimate(tree);
+  const bandLabel = REGIONAL_BANDS[est.band].label;
+  if(est.unavailable){
+    return `<div class="regional-card">
+      <div class="rc-title">Typical for this area</div>
+      ${info.label} isn't commonly grown outdoors in a "${bandLabel}" climate — if yours is thriving, your own logged history will matter more than this general estimate.
+    </div>`;
+  }
+  return `<div class="regional-card">
+    <div class="rc-title">Typical for this area (${bandLabel})</div>
+    <div class="rc-row"><span><span class="label">Bloom:</span> ${est.bloomLabel}</span><span><span class="label">Harvest:</span> ${est.harvestLabel}</span></div>
+    <div style="margin-top:6px; font-size:11.5px; color:var(--ink-soft);">A rough regional average, not specific to your yard. Log this tree's real dates below to sharpen the prediction above.</div>
+  </div>`;
+}
+
+function formatDateLong(iso){
+  if(!iso) return '—';
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString(undefined, { month:'long', day:'numeric', year:'numeric' });
+}
+
+function closeDrawer(){
+  document.getElementById('overlay').classList.remove('visible');
+  currentDrawerTreeId = null;
+}
+
+function setStorageWarning(show, message){
+  const warn = document.getElementById('storage-warning');
+  if(show){
+    warn.style.display = 'flex';
+    warn.innerHTML = `<span class="dot" style="background:var(--danger);"></span>${message || "Saving isn't available right now."}`;
+  }else{
+    warn.style.display = 'none';
+  }
+}
+
+// ---------- Init ----------
+async function init(){
+  try{
+    initMap();
+    await loadMyName();
+    await loadTrees();
+    renderMarkers();
+    renderSidebar();
+    renderFilterChips();
+
+    document.getElementById('locate-btn').addEventListener('click', locateMe);
+    document.getElementById('toggle-trees-btn').addEventListener('click', ()=>{
+      const sidebar = document.getElementById('sidebar');
+      sidebar.classList.toggle('hidden');
+      updateTreesToggleLabel();
+      setTimeout(()=>map.invalidateSize(), 260);
+    });
+    document.getElementById('add-btn').addEventListener('click', ()=>setAddMode(!addMode));
+    document.getElementById('overlay').addEventListener('click', (e)=>{ if(e.target.id==='overlay') closeDrawer(); });
+    document.getElementById('my-name-input').addEventListener('change', (e)=>saveMyName(e.target.value.trim()));
+    document.getElementById('export-data-btn').addEventListener('click', exportAllData);
+    document.getElementById('import-data-btn').addEventListener('click', ()=>document.getElementById('import-file-input').click());
+    document.getElementById('import-file-input').addEventListener('change', (e)=>{
+      const file = e.target.files[0];
+      if(file) importAllData(file);
+      e.target.value = '';
+    });
+    document.getElementById('export-modal-close').addEventListener('click', ()=>{ document.getElementById('export-modal-overlay').style.display = 'none'; });
+    document.getElementById('location-search-btn').addEventListener('click', ()=>searchLocation(document.getElementById('location-search-input').value));
+    document.getElementById('location-search-input').addEventListener('keydown', (e)=>{ if(e.key === 'Enter') searchLocation(e.target.value); });
+    let searchDebounce;
+    document.getElementById('filter-search').addEventListener('input', (e)=>{
+      clearTimeout(searchDebounce);
+      const val = e.target.value;
+      searchDebounce = setTimeout(()=>{ filters.search = val; renderSidebar(); renderMarkers(); }, 180);
+    });
+    document.getElementById('filter-when').addEventListener('change', (e)=>{ filters.when = e.target.value; renderSidebar(); renderMarkers(); });
+    document.getElementById('filter-clear').addEventListener('click', ()=>{
+      filters = { fruitTypes:new Set(), when:'all', search:'' };
+      document.getElementById('filter-search').value = '';
+      document.getElementById('filter-when').value = 'all';
+      renderFilterChips();
+      renderSidebar(); renderMarkers();
+    });
+
+    if(trees.length){
+      const avgLat = trees.reduce((s,t)=>s+t.lat,0)/trees.length;
+      const avgLng = trees.reduce((s,t)=>s+t.lng,0)/trees.length;
+      map.setView([avgLat, avgLng], 15);
+    }else{
+      locateMe();
+    }
+  }catch(e){
+    console.error('Windfall failed to initialize:', e);
+    const mapEl = document.getElementById('map');
+    if(mapEl){
+      mapEl.innerHTML = `<div style="padding:24px; font-family:sans-serif; font-size:14px; color:#5B6459;">
+        Something went wrong loading the map. Try reloading the page.<br><br>
+        If this keeps happening: check whether an ad blocker or content blocker is active for this site, since it can block the map libraries loaded from cdnjs.cloudflare.com.<br><br>
+        <span style="font-family:monospace; font-size:11px; opacity:0.7;">${(e && e.message) ? e.message.replace(/</g,'&lt;') : 'Unknown error'}</span>
+      </div>`;
+    }
+  }
+}
+init();
+
+})();
+</script>
+</body>
+</html>
