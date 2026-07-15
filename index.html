@@ -401,12 +401,7 @@
       <div class="filter-bar">
         <input type="text" class="filter-search" id="filter-search" placeholder="Search name, variety, notes…">
         <div class="filter-row" id="filter-fruit-row" style="margin-top:8px;"></div>
-        <select class="filter-select" id="filter-when">
-          <option value="all">Any ripeness</option>
-          <option value="flowering">Flowering</option>
-          <option value="ready">Ready to pick now</option>
-          <option value="soon">Ripening soon</option>
-        </select>
+        <div class="filter-row" id="filter-when-row" style="margin-top:2px; margin-bottom:8px;"></div>
         <button class="filter-clear" id="filter-clear">Clear filters</button>
       </div>
       <div id="tree-list"></div>
@@ -894,12 +889,19 @@ async function importAllData(file){
   if(!list.length){ showToast('No trees found in that file'); return; }
 
   showToast(`Importing ${list.length} tree${list.length===1?'':'s'}…`);
-  let imported = 0;
+  let imported = 0, skipped = 0;
   for(const t of list){
+    const lat = Number(t.lat), lng = Number(t.lng);
+    if(!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180){
+      console.warn('Skipping tree with invalid coordinates:', t);
+      skipped++;
+      continue;
+    }
+    const fruitType = FRUIT_INFO[t.fruitType] ? t.fruitType : 'other';
     const tree = {
       id: t.id || ('t_' + Date.now() + '_' + Math.random().toString(36).slice(2,7)),
-      name: t.name || '', fruitType: t.fruitType || 'other', variety: t.variety || '',
-      notes: t.notes || '', lat: t.lat, lng: t.lng, addedBy: t.addedBy || '',
+      name: t.name || '', fruitType, variety: t.variety || '',
+      notes: t.notes || '', lat, lng, addedBy: t.addedBy || '',
       createdAt: t.createdAt || new Date().toISOString(),
       history: Array.isArray(t.history) ? t.history : [],
       ripenessLog: Array.isArray(t.ripenessLog) ? t.ripenessLog : []
@@ -915,7 +917,7 @@ async function importAllData(file){
   await loadTrees();
   renderMarkers();
   renderSidebar();
-  showToast(`Imported ${imported} of ${list.length} trees`);
+  showToast(skipped ? `Imported ${imported} of ${list.length} trees (${skipped} skipped — invalid coordinates)` : `Imported ${imported} of ${list.length} trees`);
 }
 
 // ---------- Toast ----------
@@ -974,6 +976,16 @@ function initMap(){
   map.on('zoomend', updateMarkerIconsForZoom);
 }
 
+let pinpointMarker = null;
+function setPinpointMarker(lat, lng, label){
+  if(pinpointMarker){
+    pinpointMarker.setLatLng([lat, lng]);
+    pinpointMarker.setTooltipContent(label);
+  }else{
+    pinpointMarker = L.circleMarker([lat, lng], { radius:7, color:'#fff', weight:2, fillColor:'#2E6BE0', fillOpacity:1 }).addTo(map).bindTooltip(label);
+  }
+}
+
 function locateMe(){
   if(!navigator.geolocation){ showToast('This browser has no location support'); return; }
   showToast('Finding your location…');
@@ -991,7 +1003,7 @@ function locateMe(){
   const onSuccess = (pos)=>{
     const { latitude, longitude } = pos.coords;
     map.setView([latitude, longitude], 17);
-    L.circleMarker([latitude, longitude], { radius:7, color:'#fff', weight:2, fillColor:'#2E6BE0', fillOpacity:1 }).addTo(map).bindTooltip('You are here');
+    setPinpointMarker(latitude, longitude, 'You are here');
   };
   navigator.geolocation.getCurrentPosition(onSuccess, onError, { enableHighAccuracy:true, timeout:8000, maximumAge:0 });
 }
@@ -1010,7 +1022,7 @@ async function searchLocation(query){
       if(geoData.results && geoData.results.length){
         const r = geoData.results[0];
         map.setView([r.latitude, r.longitude], 14);
-        L.circleMarker([r.latitude, r.longitude], { radius:7, color:'#fff', weight:2, fillColor:'#2E6BE0', fillOpacity:1 }).addTo(map).bindTooltip('Search result');
+        setPinpointMarker(r.latitude, r.longitude, 'Search result');
         showToast(`Found: ${[r.name, r.admin1, r.country].filter(Boolean).join(', ')}`);
         return;
       }
@@ -1023,7 +1035,7 @@ async function searchLocation(query){
       if(results.length){
         const { lat, lon, display_name } = results[0];
         map.setView([parseFloat(lat), parseFloat(lon)], 16);
-        L.circleMarker([parseFloat(lat), parseFloat(lon)], { radius:7, color:'#fff', weight:2, fillColor:'#2E6BE0', fillOpacity:1 }).addTo(map).bindTooltip('Search result');
+        setPinpointMarker(parseFloat(lat), parseFloat(lon), 'Search result');
         showToast(`Found: ${display_name.split(',').slice(0,2).join(',')}`);
         return;
       }
@@ -1051,6 +1063,23 @@ async function reverseGeocode(lat, lng){
   }catch(e){ return null; }
 }
 
+function haversineMeters(lat1, lng1, lat2, lng2){
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+function findNearbyTree(lat, lng, thresholdMeters){
+  thresholdMeters = thresholdMeters || 8;
+  let closest = null, closestDist = Infinity;
+  trees.forEach(t=>{
+    const d = haversineMeters(lat, lng, t.lat, t.lng);
+    if(d <= thresholdMeters && d < closestDist){ closest = t; closestDist = d; }
+  });
+  return closest ? { tree: closest, distance: closestDist } : null;
+}
+
 function onMapClick(e){
   if(!addMode) return;
   setAddMode(false);
@@ -1064,16 +1093,25 @@ function setAddMode(on){
   document.getElementById('add-hint').classList.toggle('visible', on);
 }
 
-let filters = { fruitTypes: new Set(), when: 'all', search: '' };
+let filters = { fruitTypes: new Set(), whenSet: new Set(), search: '' };
+const WHEN_OPTIONS = [
+  { key:'flowering', label:'Flowering' },
+  { key:'ready', label:'Ready to pick now' },
+  { key:'soon', label:'Ripening soon' }
+];
 
 function getFilteredTrees(){
   return trees.filter(t=>{
     if(filters.fruitTypes.size && !filters.fruitTypes.has(t.fruitType)) return false;
-    if(filters.when !== 'all'){
+    if(filters.whenSet.size){
       const status = getCurrentStatus(t);
-      if(filters.when === 'flowering' && status !== 'flowering') return false;
-      if(filters.when === 'ready' && status !== 'ready') return false;
-      if(filters.when === 'soon' && status !== 'soon' && status !== 'ready') return false;
+      const matches = Array.from(filters.whenSet).some(w=>{
+        if(w === 'flowering') return status === 'flowering';
+        if(w === 'ready') return status === 'ready';
+        if(w === 'soon') return status === 'soon' || status === 'ready';
+        return false;
+      });
+      if(!matches) return false;
     }
     if(filters.search){
       const hay = `${t.name||''} ${t.variety||''} ${t.notes||''}`.toLowerCase();
@@ -1152,6 +1190,21 @@ function renderFilterChips(){
     chip.innerHTML = `<span>${info.emoji}</span>${info.label}`;
     chip.addEventListener('click', ()=>{
       if(filters.fruitTypes.has(key)) filters.fruitTypes.delete(key); else filters.fruitTypes.add(key);
+      chip.classList.toggle('selected');
+      renderMarkers(); renderSidebar();
+    });
+    row.appendChild(chip);
+  });
+}
+function renderWhenChips(){
+  const row = document.getElementById('filter-when-row');
+  row.innerHTML = '';
+  WHEN_OPTIONS.forEach(opt=>{
+    const chip = document.createElement('div');
+    chip.className = 'filter-chip' + (filters.whenSet.has(opt.key) ? ' selected' : '');
+    chip.textContent = opt.label;
+    chip.addEventListener('click', ()=>{
+      if(filters.whenSet.has(opt.key)) filters.whenSet.delete(opt.key); else filters.whenSet.add(opt.key);
       chip.classList.toggle('selected');
       renderMarkers(); renderSidebar();
     });
@@ -1291,11 +1344,12 @@ async function computePrediction(tree){
   if(validYears.length === 0) return { status:'no-data' };
 
   const base = (FRUIT_INFO[tree.fruitType] || FRUIT_INFO.other).baseTempC;
-  const targets = [];
-  for(const h of validYears){
-    const temps = await fetchArchive(tree.lat, tree.lng, h.bloomDate, h.harvestStart);
-    if(temps && temps.length) targets.push(sumGDD(temps, base));
-  }
+  const yearResults = await Promise.all(
+    validYears.map(h => fetchArchive(tree.lat, tree.lng, h.bloomDate, h.harvestStart))
+  );
+  const targets = yearResults
+    .filter(temps => temps && temps.length)
+    .map(temps => sumGDD(temps, base));
   if(targets.length === 0) return { status:'weather-unavailable' };
   const targetGDD = targets.reduce((a,b)=>a+b,0) / targets.length;
 
@@ -1311,7 +1365,7 @@ async function computePrediction(tree){
     if(!reachedDate && cumulative >= targetGDD) reachedDate = day.date;
   }
   if(reachedDate){
-    return { status:'predicted', date:reachedDate, progress:1, targetGDD, cumulative, yearsUsed:targets.length };
+    return { status:'predicted', date:reachedDate, progress:1, targetGDD, cumulative, yearsUsed:targets.length, confidence:computeConfidence(targets) };
   }
   const recent = allTemps.slice(-14);
   const avgRate = recent.length ? recent.reduce((a,d)=>a+dailyGDD(d,base),0) / recent.length : 0;
@@ -1323,7 +1377,21 @@ async function computePrediction(tree){
     lastDate.setDate(lastDate.getDate() + daysNeeded);
     projectedDate = lastDate.toISOString().slice(0,10);
   }
-  return { status:'projected', date:projectedDate, progress:Math.min(cumulative/targetGDD, 0.99), targetGDD, cumulative, yearsUsed:targets.length };
+  return { status:'projected', date:projectedDate, progress:Math.min(cumulative/targetGDD, 0.99), targetGDD, cumulative, yearsUsed:targets.length, confidence:computeConfidence(targets) };
+}
+// Confidence reflects both how many years of history we have and how consistent
+// those years' accumulated warmth-at-harvest was with each other.
+function computeConfidence(targets){
+  const n = targets.length;
+  let level = n >= 5 ? 'High' : n >= 3 ? 'Medium' : 'Low';
+  if(n >= 2){
+    const mean = targets.reduce((a,b)=>a+b,0) / n;
+    const maxDev = Math.max(...targets.map(t=>Math.abs(t-mean)));
+    const relDev = mean > 0 ? maxDev / mean : 0;
+    if(relDev > 0.5 && level === 'Medium') level = 'Low';
+    else if(relDev > 0.35 && level === 'High') level = 'Medium';
+  }
+  return level;
 }
 
 // ---------- Drawer: add/edit tree ----------
@@ -1337,9 +1405,14 @@ function openTreeForm(existingTree, latlng){
   };
 
   const drawer = document.getElementById('drawer');
+  const nearby = isNew ? findNearbyTree(tree.lat, tree.lng) : null;
   drawer.innerHTML = `
     <button class="close-btn" id="close-drawer">✕</button>
     <h2>${isNew ? 'Add a tree' : 'Edit tree'}</h2>
+    ${nearby ? `<div class="advice-card" style="background:rgba(199,178,58,0.12); border-color:rgba(199,178,58,0.35);">
+      <span class="tag" style="background:var(--gold); color:#fff;">Possible duplicate</span>
+      <div>"${escapeHtml(nearby.tree.name || FRUIT_INFO[nearby.tree.fruitType]?.label || 'A tree')}" is already logged about ${Math.round(nearby.distance)}m away. Make sure this isn't the same tree before adding a new one.</div>
+    </div>` : ''}
     <div class="field">
       <label>Name / location note</label>
       <input type="text" id="f-name" placeholder="${isNew ? 'Looking up nearest address…' : 'e.g. Big apple by the mailbox'}" value="${escapeHtml(tree.name)}">
@@ -1751,6 +1824,20 @@ function applyLogToHistory(tree, entry){
   if(entry.status === 'over' && !yearEntry.harvestEnd) yearEntry.harvestEnd = entry.date;
 }
 
+// When a check-in is deleted, re-derive just the one history field it could have set
+// (from whichever check-ins of that status/year remain) instead of leaving a stale date behind.
+function recalcHistoryFieldForYear(tree, year, status){
+  const fieldMap = { flowering:'bloomDate', ready:'harvestStart', over:'harvestEnd' };
+  const field = fieldMap[status];
+  if(!field) return;
+  const yearEntry = (tree.history || []).find(h => h.year === year);
+  if(!yearEntry) return;
+  const remaining = (tree.ripenessLog || [])
+    .filter(l => l.status === status && l.date.slice(0,4) === String(year))
+    .sort((a,b) => a.date.localeCompare(b.date));
+  yearEntry[field] = remaining.length ? remaining[0].date : '';
+}
+
 function renderLogTimeline(tree){
   const el = document.getElementById('log-timeline');
   const logs = (tree.ripenessLog || []).slice().sort((a,b)=>b.date.localeCompare(a.date));
@@ -1778,12 +1865,15 @@ function renderLogTimeline(tree){
   `).join('');
   el.querySelectorAll('.remove-row').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
+      const deletedLog = tree.ripenessLog.find(l=>l.id === btn.dataset.logId);
       tree.ripenessLog = tree.ripenessLog.filter(l=>l.id !== btn.dataset.logId);
+      if(deletedLog) recalcHistoryFieldForYear(tree, parseInt(deletedLog.date.slice(0,4),10), deletedLog.status);
       const idx = trees.findIndex(t=>t.id===tree.id);
       trees[idx] = tree;
       await upsertTreeRemote(tree);
       delete predictionCache[tree.id];
       renderLogTimeline(tree);
+      renderHistoryTable(tree);
       renderMarkers(); renderSidebar();
     });
   });
@@ -1798,8 +1888,8 @@ function loadDetailPhotos(tree, gallery){
         return;
       }
       gallery.innerHTML = `
-        ${treePhoto ? `<figure><img src="${treePhoto}" alt="Tree photo"><figcaption>Tree</figcaption></figure>` : ''}
-        ${fruitPhoto ? `<figure><img src="${fruitPhoto}" alt="Fruit close-up"><figcaption>Fruit close-up</figcaption></figure>` : ''}
+        ${treePhoto ? `<figure><img src="${treePhoto}" alt="Tree photo" loading="lazy"><figcaption>Tree</figcaption></figure>` : ''}
+        ${fruitPhoto ? `<figure><img src="${fruitPhoto}" alt="Fruit close-up" loading="lazy"><figcaption>Fruit close-up</figcaption></figure>` : ''}
       `;
     })
     .catch(()=>{
@@ -1883,7 +1973,8 @@ function renderPredictionResult(result){
       </div>
       <div class="text">
         <div class="headline">${headline}</div>
-        <div class="sub">Based on accumulated warmth (growing-degree-days) vs. this tree's ${result.yearsUsed} past year${result.yearsUsed===1?'':'s'} of history</div>
+        <div class="sub">Based on accumulated warmth (growing-degree-days) vs. this tree's ${result.yearsUsed} past year${result.yearsUsed===1?'':'s'} of history · ${result.confidence||'Low'} confidence</div>
+        ${result.confidence === 'Low' ? '<div class="sub" style="margin-top:2px;">Log a few more harvests here to sharpen this over time.</div>' : ''}
       </div>
     </div>
     <div class="predict-note">This is a data-informed estimate, not a guarantee — local shade, soil, and this year's rainfall also affect timing. Keep logging harvest dates each year to sharpen it.</div>
@@ -1936,6 +2027,7 @@ async function init(){
     renderMarkers();
     renderSidebar();
     renderFilterChips();
+    renderWhenChips();
 
     document.getElementById('locate-btn').addEventListener('click', locateMe);
     document.getElementById('toggle-trees-btn').addEventListener('click', ()=>{
@@ -1963,12 +2055,11 @@ async function init(){
       const val = e.target.value;
       searchDebounce = setTimeout(()=>{ filters.search = val; renderSidebar(); renderMarkers(); }, 180);
     });
-    document.getElementById('filter-when').addEventListener('change', (e)=>{ filters.when = e.target.value; renderSidebar(); renderMarkers(); });
     document.getElementById('filter-clear').addEventListener('click', ()=>{
-      filters = { fruitTypes:new Set(), when:'all', search:'' };
+      filters = { fruitTypes:new Set(), whenSet:new Set(), search:'' };
       document.getElementById('filter-search').value = '';
-      document.getElementById('filter-when').value = 'all';
       renderFilterChips();
+      renderWhenChips();
       renderSidebar(); renderMarkers();
     });
 
