@@ -255,7 +255,8 @@
   .photo-remove-link{ font-size:11px; color:var(--danger); background:none; border:none; cursor:pointer; text-align:left; padding:0; }
   .photo-gallery{ display:flex; gap:10px; margin-top:8px; }
   .photo-gallery figure{ margin:0; text-align:center; }
-  .photo-gallery img{ width:120px; height:120px; object-fit:cover; border-radius:9px; border:1px solid var(--line); display:block; }
+  .photo-gallery img{ width:120px; height:120px; object-fit:cover; border-radius:9px; border:1px solid var(--line); display:block; cursor:zoom-in; }
+  .log-photo-thumb{ width:34px; height:34px; object-fit:cover; border-radius:6px; border:1px solid var(--line); cursor:zoom-in; flex-shrink:0; }
   .photo-gallery figcaption{ font-size:10.5px; color:var(--ink-soft); margin-top:4px; }
   .photo-loading{ font-size:11.5px; color:var(--ink-soft); padding:6px 0; }
 
@@ -425,6 +426,9 @@
   <div id="drawer"></div>
 </div>
 <div id="toast"></div>
+<div id="photo-lightbox" style="display:none; position:fixed; inset:0; background:rgba(20,24,18,0.92); z-index:3000; align-items:center; justify-content:center; cursor:zoom-out;">
+  <img id="lightbox-img" style="max-width:92vw; max-height:92vh; border-radius:8px; box-shadow:0 10px 40px rgba(0,0,0,0.5); object-fit:contain;">
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js" crossorigin="anonymous"></script>
@@ -780,12 +784,12 @@ function loadImageEl(dataUrl){
     img.src = dataUrl;
   });
 }
-async function compressImageFile(file, maxDim, quality){
+async function compressImageFile(file, maxDim, quality, targetBytes){
   // Tuned for phone-first viewing but still sharp on a desktop screen:
   // 1280px longest side is plenty of detail at typical viewing sizes,
   // and we aim for roughly 900KB or less per photo to keep shared storage light.
   maxDim = maxDim || 1280; quality = quality || 0.78;
-  const targetBytes = 900 * 1024;
+  targetBytes = targetBytes || 900 * 1024;
   const hardCapBytes = 4.3 * 1024 * 1024;
   const dataUrl = await readFileAsDataURL(file);
   const img = await loadImageEl(dataUrl);
@@ -845,6 +849,25 @@ async function deletePhoto(treeId, kind){
 }
 async function deletePhotoFile(treeId, kind){
   try{ await sb.storage.from(PHOTO_BUCKET).remove([`${treeId}-${kind}.jpg`]); }catch(e){}
+}
+
+// Check-in photos are quick documentation snapshots, not hero images — compress much
+// smaller (640px, ~180KB target) so a season of check-ins doesn't add up to much storage.
+async function compressLogPhoto(file){
+  return compressImageFile(file, 640, 0.65, 180 * 1024);
+}
+async function saveLogPhoto(treeId, logId, dataUrl){
+  try{
+    const blob = await (await fetch(dataUrl)).blob();
+    const path = `${treeId}-log-${logId}.jpg`;
+    const { error } = await sb.storage.from(PHOTO_BUCKET).upload(path, blob, { upsert:true, contentType:'image/jpeg' });
+    if(error) throw error;
+    const { data } = sb.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+    return data.publicUrl + '?t=' + Date.now();
+  }catch(e){ console.error('saveLogPhoto error:', e); return null; }
+}
+async function deleteLogPhotoFile(treeId, logId){
+  try{ await sb.storage.from(PHOTO_BUCKET).remove([`${treeId}-log-${logId}.jpg`]); }catch(e){}
 }
 
 // ---------- Export (for migrating off Claude storage) ----------
@@ -931,6 +954,17 @@ function showToast(msg){
   t.classList.add('visible');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(()=>t.classList.remove('visible'), 2600);
+}
+
+// ---------- Photo lightbox ----------
+function openLightbox(src){
+  document.getElementById('lightbox-img').src = src;
+  document.getElementById('photo-lightbox').style.display = 'flex';
+}
+function wireLightboxTriggers(container){
+  container.querySelectorAll('img[data-lightbox]').forEach(img=>{
+    img.addEventListener('click', ()=>openLightbox(img.dataset.lightbox));
+  });
 }
 
 // ---------- Map ----------
@@ -1528,9 +1562,12 @@ function openTreeForm(existingTree, latlng){
     const removeBtn = document.getElementById(`${kind}-photo-remove`);
     if(src){
       img.src = src; img.classList.remove('empty'); img.alt = `${kind} photo`;
+      img.style.cursor = 'zoom-in';
+      img.onclick = ()=>openLightbox(src);
       removeBtn.style.display = 'block';
     }else{
       img.removeAttribute('src'); img.classList.add('empty'); img.alt = 'No photo';
+      img.onclick = null;
       removeBtn.style.display = 'none';
     }
   }
@@ -1654,6 +1691,9 @@ function openTreeForm(existingTree, latlng){
       await deleteTreeRemote(tree.id);
       await deletePhotoFile(tree.id, 'tree');
       await deletePhotoFile(tree.id, 'fruit');
+      for(const l of (tree.ripenessLog || [])){
+        if(l.photoUrl) await deleteLogPhotoFile(tree.id, l.id);
+      }
       trees = trees.filter(t=>t.id !== tree.id);
       renderMarkers();
       renderSidebar();
@@ -1775,12 +1815,27 @@ function renderUpdateForm(tree){
       </div>
     </div>
     <textarea class="ripeness-note-input" id="upd-note" placeholder="Optional note — amount, taste, condition…"></textarea>
+    <div class="field" style="margin-top:10px;">
+      <label>Photo <span style="text-transform:none; font-weight:400;">(optional)</span></label>
+      <div class="photo-field">
+        <img class="photo-thumb empty" id="upd-photo-preview">
+        <div class="photo-controls">
+          <input type="file" accept="image/*" capture="environment" id="upd-photo-input">
+          <button class="photo-remove-link" id="upd-photo-remove" style="display:none;">Remove photo</button>
+        </div>
+      </div>
+      <div class="predict-note" id="upd-photo-hint" style="display:none; margin-top:6px;">Marking this "Ready now" will also set this photo as the tree's main fruit photo.</div>
+    </div>
     <div style="display:flex; gap:8px; margin-top:8px;">
       <button class="action primary" id="upd-save-btn" disabled>Save update</button>
       <button class="action" id="upd-cancel-btn">Cancel</button>
     </div>
   `;
   let selectedStatus = null;
+  let pendingPhotoDataUrl = null;
+  function updatePhotoHint(){
+    document.getElementById('upd-photo-hint').style.display = (pendingPhotoDataUrl && selectedStatus === 'ready') ? 'block' : 'none';
+  }
   container.querySelectorAll('.ripeness-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       selectedStatus = btn.dataset.status;
@@ -1790,7 +1845,28 @@ function renderUpdateForm(tree){
         b.style.borderColor = isSel ? 'var(--ink)' : 'var(--line)';
       });
       document.getElementById('upd-save-btn').disabled = false;
+      updatePhotoHint();
     });
+  });
+  document.getElementById('upd-photo-input').addEventListener('change', async (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    showToast('Processing photo…');
+    try{
+      const compressed = await compressLogPhoto(file);
+      pendingPhotoDataUrl = compressed;
+      const img = document.getElementById('upd-photo-preview');
+      img.src = compressed; img.classList.remove('empty'); img.alt = 'Check-in photo';
+      document.getElementById('upd-photo-remove').style.display = 'block';
+      updatePhotoHint();
+    }catch(err){ showToast("Couldn't read that photo — try another"); }
+  });
+  document.getElementById('upd-photo-remove').addEventListener('click', ()=>{
+    pendingPhotoDataUrl = null;
+    const img = document.getElementById('upd-photo-preview');
+    img.removeAttribute('src'); img.classList.add('empty'); img.alt = 'No photo';
+    document.getElementById('upd-photo-remove').style.display = 'none';
+    updatePhotoHint();
   });
   document.getElementById('upd-cancel-btn').addEventListener('click', ()=>{ container.innerHTML = ''; container.dataset.open = 'false'; });
   document.getElementById('upd-save-btn').addEventListener('click', async (e)=>{
@@ -1800,6 +1876,17 @@ function renderUpdateForm(tree){
     const date = document.getElementById('upd-date').value || today;
     const note = document.getElementById('upd-note').value.trim();
     const entry = { id:'log_'+Date.now()+'_'+Math.random().toString(36).slice(2,6), date, status:selectedStatus, note, loggedBy: myName };
+    if(pendingPhotoDataUrl){
+      const uploadedUrl = await saveLogPhoto(tree.id, entry.id, pendingPhotoDataUrl);
+      if(uploadedUrl){
+        entry.photoUrl = uploadedUrl;
+        // The best reference photo for "what does ripe fruit look like" is the most
+        // recent confirmed-ready check-in — promote it to the tree's main fruit photo.
+        if(selectedStatus === 'ready') tree.fruitPhotoUrl = uploadedUrl;
+      }else{
+        showToast("Update saved, but the photo couldn't be uploaded");
+      }
+    }
     tree.ripenessLog = tree.ripenessLog || [];
     tree.ripenessLog.push(entry);
     applyLogToHistory(tree, entry);
@@ -1810,6 +1897,8 @@ function renderUpdateForm(tree){
     container.innerHTML = ''; container.dataset.open = 'false';
     renderLogTimeline(tree);
     renderHistoryTable(tree);
+    const gallery = document.getElementById('detail-photo-gallery');
+    if(gallery) loadDetailPhotos(tree, gallery);
     renderMarkers(); renderSidebar();
     showToast('Update saved');
   });
@@ -1861,16 +1950,19 @@ function renderLogTimeline(tree){
           <span class="rdot" style="background:${statusColor[l.status]||'var(--ink-soft)'}"></span>
           <span class="le-date">${formatDateShort(l.date)}</span>
           <span style="flex:1;">${statusLabel[l.status]||l.status}${l.note ? ' — ' + escapeHtml(l.note) : ''}${l.loggedBy ? ` <span class="le-meta">(${escapeHtml(l.loggedBy)})</span>` : ''}</span>
+          ${l.photoUrl ? `<img class="log-photo-thumb" src="${l.photoUrl}" alt="Check-in photo" loading="lazy" data-lightbox="${l.photoUrl}">` : ''}
           <button class="remove-row" data-log-id="${l.id}" title="Delete this check-in">✕</button>
         </div>
       `).join('')}
     </div>
   `).join('');
+  wireLightboxTriggers(el);
   el.querySelectorAll('.remove-row').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       const deletedLog = tree.ripenessLog.find(l=>l.id === btn.dataset.logId);
       tree.ripenessLog = tree.ripenessLog.filter(l=>l.id !== btn.dataset.logId);
       if(deletedLog) recalcHistoryFieldForYear(tree, parseInt(deletedLog.date.slice(0,4),10), deletedLog.status);
+      if(deletedLog && deletedLog.photoUrl) deleteLogPhotoFile(tree.id, deletedLog.id);
       const idx = trees.findIndex(t=>t.id===tree.id);
       trees[idx] = tree;
       await upsertTreeRemote(tree);
@@ -1891,9 +1983,10 @@ function loadDetailPhotos(tree, gallery){
         return;
       }
       gallery.innerHTML = `
-        ${treePhoto ? `<figure><img src="${treePhoto}" alt="Tree photo" loading="lazy"><figcaption>Tree</figcaption></figure>` : ''}
-        ${fruitPhoto ? `<figure><img src="${fruitPhoto}" alt="Fruit close-up" loading="lazy"><figcaption>Fruit close-up</figcaption></figure>` : ''}
+        ${treePhoto ? `<figure><img src="${treePhoto}" alt="Tree photo" loading="lazy" data-lightbox="${treePhoto}"><figcaption>Tree</figcaption></figure>` : ''}
+        ${fruitPhoto ? `<figure><img src="${fruitPhoto}" alt="Fruit close-up" loading="lazy" data-lightbox="${fruitPhoto}"><figcaption>Fruit close-up</figcaption></figure>` : ''}
       `;
+      wireLightboxTriggers(gallery);
     })
     .catch(()=>{
       gallery.innerHTML = `<div class="photo-loading">Couldn't load photos just now. <button class="filter-clear" style="display:inline;" id="retry-photos-btn">Retry</button></div>`;
@@ -2041,6 +2134,7 @@ async function init(){
     });
     document.getElementById('add-btn').addEventListener('click', ()=>setAddMode(!addMode));
     document.getElementById('overlay').addEventListener('click', (e)=>{ if(e.target.id==='overlay') closeDrawer(); });
+    document.getElementById('photo-lightbox').addEventListener('click', ()=>{ document.getElementById('photo-lightbox').style.display = 'none'; });
     document.getElementById('my-name-input').addEventListener('change', (e)=>saveMyName(e.target.value.trim()));
     document.getElementById('export-data-btn').addEventListener('click', exportAllData);
     document.getElementById('import-data-btn').addEventListener('click', ()=>document.getElementById('import-file-input').click());
